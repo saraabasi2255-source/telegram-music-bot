@@ -1,5 +1,5 @@
 // GET /api/admin?key=WEBHOOK_SECRET
-// صفحه‌ی پنل ادمین برای دیدن و حذف آهنگ‌های دیتابیس
+// صفحه‌ی پنل ادمین: لیست آهنگ‌ها + لینک مستقیم به پیام چنل + حذف
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -41,7 +41,7 @@ export async function onRequestGet(context) {
   }
   .btn:hover { opacity: .9; }
   .btn-danger { background: #dc2626; }
-  .btn-ghost { background: #2b3a4a; }
+  .btn-open { background: #0ea5e9; }
   table {
     width: 100%; border-collapse: collapse; background: #131b25;
     border-radius: 10px; overflow: hidden; font-size: 14px;
@@ -64,6 +64,13 @@ export async function onRequestGet(context) {
   a { color: #60a5fa; text-decoration: none; }
   a:hover { text-decoration: underline; }
   .key-cell { font-family: monospace; font-size: 12px; color: #7b8ea3; word-break: break-all; }
+  .title-link {
+    color: #e8eef5; font-weight: bold; text-decoration: none;
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .title-link:hover { color: #60a5fa; text-decoration: underline; }
+  .title-link .arr { opacity: .5; font-size: 12px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; }
 </style>
 </head>
 <body>
@@ -88,7 +95,7 @@ export async function onRequestGet(context) {
         <th style="width:120px">چت آیدی</th>
         <th style="width:90px">پیام</th>
         <th style="width:160px">تاریخ</th>
-        <th style="width:100px">عملیات</th>
+        <th style="width:200px">عملیات</th>
       </tr>
     </thead>
     <tbody id="rows">
@@ -126,6 +133,16 @@ export async function onRequestGet(context) {
     })[c]);
   }
 
+  // ساخت لینک مستقیم به پیام توی چنل خصوصی تلگرام
+  // chat_id مثل -1004458074153 → لینک: https://t.me/c/4458074153/<message_id>
+  function buildTelegramLink(chatId, messageId) {
+    if (!chatId || !messageId) return null;
+    const s = String(chatId);
+    // حذف پیشوند -100 برای چنل‌های خصوصی
+    const shortId = s.startsWith("-100") ? s.slice(4) : s.replace("-", "");
+    return "https://t.me/c/" + shortId + "/" + messageId;
+  }
+
   async function load() {
     try {
       const res = await fetch("/api/admin/list?key=" + encodeURIComponent(KEY));
@@ -156,10 +173,21 @@ export async function onRequestGet(context) {
       return;
     }
 
-    rowsEl.innerHTML = list.map(s => \`
+    rowsEl.innerHTML = list.map(s => {
+      const tgLink = buildTelegramLink(s.chat_id, s.message_id);
+      const titleInner = esc(s.title) || "<span class='muted'>—</span>";
+      const titleHtml = tgLink
+        ? \`<a class="title-link" href="\${tgLink}" target="_blank" rel="noopener" title="باز کردن در تلگرام">\${titleInner} <span class="arr">↗</span></a>\`
+        : titleInner;
+
+      const openBtn = tgLink
+        ? \`<a class="btn btn-open" href="\${tgLink}" target="_blank" rel="noopener">باز کردن ↗</a>\`
+        : "";
+
+      return \`
       <tr data-id="\${s.id}">
         <td class="muted">\${s.id}</td>
-        <td>\${esc(s.title) || "<span class='muted'>—</span>"}</td>
+        <td>\${titleHtml}</td>
         <td>\${esc(s.performer) || "<span class='muted'>—</span>"}</td>
         <td class="key-cell">\${esc(s.file_name) || "—"}</td>
         <td>\${fmtDuration(s.duration)}</td>
@@ -167,10 +195,13 @@ export async function onRequestGet(context) {
         <td class="key-cell">\${esc(s.message_id)}</td>
         <td class="muted">\${esc(s.created_at)}</td>
         <td>
-          <button class="btn btn-danger" onclick="del(\${s.id})">حذف</button>
+          <div class="actions">
+            \${openBtn}
+            <button class="btn btn-danger" onclick="del(\${s.id})">حذف</button>
+          </div>
         </td>
-      </tr>
-    \`).join("");
+      </tr>\`;
+    }).join("");
   }
 
   async function del(id) {
