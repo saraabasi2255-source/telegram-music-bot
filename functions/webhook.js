@@ -50,7 +50,7 @@ async function handleChannelPost(msg, env) {
     return;
   }
 
-  const chatId = msg.chat.id; // آیدی عددی چنل آرشیو - برای کپی کردن بعدی لازمه
+  const chatId = msg.chat.id;
   const title = audio.title || null;
   const performer = audio.performer || null;
   const fileName = audio.file_name || null;
@@ -89,7 +89,8 @@ async function handleMessage(msg, env) {
 
   if (!text) return;
 
-  const results = await searchSongs(env, text, 8);
+  // همه‌ی نتایج (سقف ۱۰۰) رو می‌گیریم تا صفحه‌بندی درست کار کنه
+  const results = await searchSongs(env, text, 100);
 
   if (results.length === 0) {
     await sendMessage(env, chatId, "چیزی با این اسم پیدا نکردم 😕 یه کلمه دیگه امتحان کن.");
@@ -101,24 +102,24 @@ async function handleMessage(msg, env) {
     return;
   }
 
-  // چند نتیجه پیدا شده - لیست دکمه‌ای نشون بده
-  const buttons = results.map((r) => {
-    const label = buildLabel(r);
-    return [{ text: label, callback_data: `song:${r.id}` }];
-  });
-
-  await sendMessage(env, chatId, `${results.length} نتیجه پیدا شد، کدومو می‌خوای؟ 👇`, {
-    inline_keyboard: buttons,
-  });
+  // لیست صفحه‌بندی‌شده (صفحه ۰)
+  await sendResultsPage(env, chatId, results, 0, text);
 }
 
 // ── وقتی کاربر روی یکی از دکمه‌های لیست می‌زنه ────────────────
 
 async function handleCallbackQuery(cq, env) {
   const chatId = cq.message?.chat?.id;
+  const messageId = cq.message?.message_id;
   const data = cq.data || "";
 
-  if (data.startsWith("song:") && chatId) {
+  if (!chatId) {
+    await answerCallbackQuery(env, cq.id);
+    return;
+  }
+
+  // ① انتخاب یک آهنگ از لیست
+  if (data.startsWith("song:")) {
     const id = Number(data.slice("song:".length));
     const song = await env.DB.prepare(
       `SELECT id, chat_id, message_id, title, performer, caption FROM songs WHERE id = ?1`
@@ -134,12 +135,55 @@ async function handleCallbackQuery(cq, env) {
     }
   }
 
+  // ② رفتن به صفحه‌ی بعد/قبل
+  // فرمت callback_data: page:<pageNumber>:<query>
+  else if (data.startsWith("page:")) {
+    const rest = data.slice("page:".length);
+    const firstColon = rest.indexOf(":");
+    const page = Number(rest.slice(0, firstColon));
+    const q = rest.slice(firstColon + 1);
+
+    if (!Number.isInteger(page) || page < 0) {
+      await answerCallbackQuery(env, cq.id);
+      return;
+    }
+
+    const results = await searchSongs(env, q, 100);
+    if (results.length === 0) {
+      await answerCallbackQuery(env, cq.id, "دیگه چیزی نمونده.");
+      return;
+    }
+
+    await editResultsPage(env, chatId, messageId, results, page, q);
+    await answerCallbackQuery(env, cq.id);
+    return;
+  }
+
+  // ③ بستن لیست (حذف پیام)
+  else if (data === "close") {
+    if (messageId) {
+      await deleteMessage(env, chatId, messageId);
+    }
+    await answerCallbackQuery(env, cq.id);
+    return;
+  }
+
+  // ④ دکمه‌ی غیرفعال (شماره صفحه) — فقط برای نمایش
+  else if (data === "noop") {
+    await answerCallbackQuery(env, cq.id);
+    return;
+  }
+
   await answerCallbackQuery(env, cq.id);
 }
 
 // ── توابع کمکی ────────────────────────────────────────────────
 
-async function searchSongs(env, q, limit = 8) {
+// تعداد آیتم در هر صفحه
+const PAGE_SIZE = 7;
+
+// جستجو در دیتابیس (تا سقف limit)
+async function searchSongs(env, q, limit = 100) {
   const like = `%${q}%`;
   const startsWith = `${q}%`;
 
@@ -162,6 +206,67 @@ async function searchSongs(env, q, limit = 8) {
   return results;
 }
 
+// ساخت متن و دکمه‌های یک صفحه
+function buildResultsKeyboard(results, page, q) {
+  const totalPages = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(page, 0), totalPages - 1);
+  const start = safePage * PAGE_SIZE;
+  const slice = results.slice(start, start + PAGE_SIZE);
+
+  const rows = slice.map((r) => [
+    { text: buildLabel(r), callback_data: `song:${r.id}` },
+  ]);
+
+  // ردیف ناوبری: قبلی / شماره صفحه / بعدی
+  const nav = [];
+  if (safePage > 0) {
+    nav.push({ text: "◀ قبلی", callback_data: `page:${safePage - 1}:${q}` });
+  }
+  nav.push({
+    text: `${safePage + 1}/${totalPages}`,
+    callback_data: "noop",
+  });
+  if (safePage < totalPages - 1) {
+    nav.push({ text: "بعدی ▶", callback_data: `page:${safePage + 1}:${q}` });
+  }
+  if (nav.length) rows.push(nav);
+
+  // ردیف بستن
+  rows.push([{ text: "✖ بستن", callback_data: "close" }]);
+
+  const text =
+    `${results.length} نتیجه پیدا شد — صفحه ${safePage + 1} از ${totalPages}\n` +
+    `کدومو می‌خوای؟ 👇`;
+
+  return { text, reply_markup: { inline_keyboard: rows } };
+}
+
+// ارسال صفحه‌ی جدید (پیام تازه)
+async function sendResultsPage(env, chatId, results, page, q) {
+  const { text, reply_markup } = buildResultsKeyboard(results, page, q);
+  await sendMessage(env, chatId, text, reply_markup);
+}
+
+// ویرایش پیام فعلی برای نمایش صفحه‌ی جدید
+async function editResultsPage(env, chatId, messageId, results, page, q) {
+  if (!messageId) {
+    await sendResultsPage(env, chatId, results, page, q);
+    return;
+  }
+  const { text, reply_markup } = buildResultsKeyboard(results, page, q);
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/editMessageText`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      reply_markup,
+    }),
+  });
+}
+
+// ساخت برچسب دکمه‌ی هر آهنگ
 function buildLabel(song) {
   const title = song.title || "بدون عنوان";
   const performer = song.performer ? ` - ${song.performer}` : "";
@@ -219,6 +324,8 @@ async function deliverSong(env, toChatId, song) {
   }
 }
 
+// ── توابع پایه‌ی تلگرام ──────────────────────────────────────
+
 async function sendMessage(env, chatId, text, reply_markup) {
   await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -232,5 +339,13 @@ async function answerCallbackQuery(env, callbackQueryId, text) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ callback_query_id: callbackQueryId, text }),
+  });
+}
+
+async function deleteMessage(env, chatId, messageId) {
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/deleteMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, message_id: messageId }),
   });
 }
