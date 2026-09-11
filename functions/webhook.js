@@ -39,7 +39,18 @@ async function handleChannelPost(msg, env) {
   const audio = msg.audio;
   if (!audio) return; // فقط فایل‌های صوتی (audio) رو ثبت می‌کنیم
 
-  const chatId = msg.chat.id; // آیدی عددی چنل - برای کپی کردن بعدی لازمه
+  // 👇 فقط از چنل آرشیو ذخیره کن، نه از چنل اصلی
+  const archiveChatId = env.ARCHIVE_CHAT_ID ? String(env.ARCHIVE_CHAT_ID) : null;
+  if (!archiveChatId) {
+    console.warn("ARCHIVE_CHAT_ID تنظیم نشده - هیچ آهنگی ذخیره نمی‌شه");
+    return;
+  }
+  if (String(msg.chat.id) !== archiveChatId) {
+    // پیام از چنل اصلی یا هر جای دیگه ⇒ نادیده بگیر
+    return;
+  }
+
+  const chatId = msg.chat.id; // آیدی عددی چنل آرشیو - برای کپی کردن بعدی لازمه
   const title = audio.title || null;
   const performer = audio.performer || null;
   const fileName = audio.file_name || null;
@@ -159,6 +170,7 @@ function buildLabel(song) {
 }
 
 // آهنگ رو دقیقاً با همون کپشن اصلی‌اش برای کاربر کپی می‌کنه
+// اگه پیام اصلی تو چنل آرشیو پاک شده باشه، رکورد رو از دیتابیس هم حذف می‌کنه
 async function deliverSong(env, toChatId, song) {
   if (!song.chat_id) {
     await sendMessage(
@@ -169,16 +181,42 @@ async function deliverSong(env, toChatId, song) {
     return;
   }
 
-  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/copyMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      chat_id: toChatId,
-      from_chat_id: song.chat_id,
-      message_id: song.message_id,
-      // caption رو عمداً ست نمی‌کنیم تا کپشن اصلی پیام حفظ بشه
-    }),
-  });
+  const res = await fetch(
+    `https://api.telegram.org/bot${env.BOT_TOKEN}/copyMessage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: toChatId,
+        from_chat_id: song.chat_id,
+        message_id: song.message_id,
+        // caption رو عمداً ست نمی‌کنیم تا کپشن اصلی پیام حفظ بشه
+      }),
+    }
+  );
+
+  const data = await res.json();
+
+  if (!data.ok) {
+    const desc = (data.description || "").toLowerCase();
+    // اگه پیام اصلی تو چنل آرشیو پاک شده باشه ⇒ از دیتابیس هم پاک کن
+    if (
+      desc.includes("message to copy not found") ||
+      desc.includes("message not found") ||
+      desc.includes("message_id_invalid")
+    ) {
+      if (song.id) {
+        await env.DB.prepare(`DELETE FROM songs WHERE id = ?1`).bind(song.id).run();
+      }
+      await sendMessage(
+        env,
+        toChatId,
+        "این آهنگ از چنل آرشیو حذف شده و دیگه در دسترس نیست 🗑"
+      );
+      return;
+    }
+    await sendMessage(env, toChatId, "ارسال آهنگ با خطا مواجه شد.");
+  }
 }
 
 async function sendMessage(env, chatId, text, reply_markup) {
