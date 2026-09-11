@@ -1,0 +1,134 @@
+:root {
+  --bg: var(--tg-theme-bg-color, #0f1115);
+  --text: var(--tg-theme-text-color, #f2f2f2);
+  --hint: var(--tg-theme-hint-color, #8a8f98);
+  --link: var(--tg-theme-link-color, #6ab3f3);
+  --button: var(--tg-theme-button-color, #6ab3f3);
+  --button-text: var(--tg-theme-button-text-color, #0f1115);
+  --card: var(--tg-theme-secondary-bg-color, #171a21);
+  --accent: #e0a458;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Vazirmatn", -apple-system, sans-serif;
+  min-height: 100vh;
+}
+
+.app {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 20px 16px 40px;
+}
+
+.app-header h1 {
+  font-size: 22px;
+  font-weight: 700;
+  margin: 4px 0 2px;
+}
+
+.subtitle {
+  color: var(--hint);
+  font-size: 14px;
+  margin: 0 0 20px;
+}
+
+.search-box {
+  position: relative;
+  margin-bottom: 18px;
+}
+
+#search-input {
+  width: 100%;
+  padding: 14px 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(138, 143, 152, 0.25);
+  background: var(--card);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 16px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+#search-input:focus {
+  border-color: var(--accent);
+}
+
+.status {
+  color: var(--hint);
+  font-size: 13px;
+  min-height: 18px;
+  margin-bottom: 6px;
+  padding-inline: 4px;
+}
+
+.results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.song-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--card);
+  border-radius: 14px;
+  padding: 12px 14px;
+  text-decoration: none;
+  color: var(--text);
+  transition: transform 0.08s ease, background 0.15s ease;
+}
+
+.song-item:active {
+  transform: scale(0.98);
+  background: rgba(224, 164, 88, 0.12);
+}
+
+.song-note {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #14161c;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+}
+
+.song-text {
+  min-width: 0;
+}
+
+.song-title {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.song-performer {
+  font-size: 13px;
+  color: var(--hint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--hint);
+  font-size: 14px;
+  padding: 40px 10px;
+}
