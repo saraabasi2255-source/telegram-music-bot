@@ -1,7 +1,5 @@
 // GET /api/admin?key=WEBHOOK_SECRET
 // صفحه‌ی پنل ادمین: لیست آهنگ‌ها + لینک مستقیم به پیام چنل + حذف
-// UI/UX combined from the new design (search, filter, sort, pagination, multi-select bulk delete)
-// while keeping the original auth + API wiring untouched.
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -163,7 +161,6 @@ export async function onRequestGet(context) {
   tbody tr.song-row.selected { background: var(--accent-soft); }
   .is-selecting .chevron-cell .chevron-btn { visibility: hidden; pointer-events: none; }
 
-
   .table-shell {
     background: var(--surface); border: 1px solid var(--border-soft);
     border-radius: var(--radius-lg); overflow: hidden;
@@ -259,7 +256,7 @@ export async function onRequestGet(context) {
   .modal-btns { display: flex; gap: 8px; }
   .modal-btns .btn, .modal-btns .btn-ghost { flex: 1; justify-content: center; padding: 9px; }
 
-  /* ---------- responsive: compact rows, no card boxes ---------- */
+  /* ---------- responsive ---------- */
   @media (max-width: 760px) {
     body { padding: 14px 12px 50px; }
     .topbar { position: static; padding: 14px; }
@@ -507,7 +504,7 @@ export async function onRequestGet(context) {
       case "oldest": return { key: "created_at", dir: 1 };
       case "title":  return { key: "title", dir: 1 };
       case "artist": return { key: "performer", dir: 1 };
-      default:       return { key: "created_at", dir: -1 }; // newest
+      default:       return { key: "created_at", dir: -1 };
     }
   }
 
@@ -580,19 +577,20 @@ export async function onRequestGet(context) {
       const isOpen = openDetailId === s.id;
       const isSelected = selectedIds.has(s.id);
       const tgLink = buildTelegramLink(s.chat_id, s.message_id);
+
+      // دکمه‌ها با data-action (بدون onclick inline که میشکست)
       const openBtn = tgLink
-        ? '<a class="btn btn-open" href="' + tgLink + '" target="_blank" rel="noopener" onclick="event.stopPropagation()">Open in Telegram</a>'
+        ? '<a class="btn btn-open" href="' + esc(tgLink) + '" target="_blank" rel="noopener" data-action="stop">Open in Telegram</a>'
         : "";
       const copyBtn = tgLink
-        ? '<button class="btn-copy" onclick="event.stopPropagation(); copyLink(\'' + tgLink + '\')" title="Copy link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> Copy link</button>'
+        ? '<button class="btn-copy" data-action="copy" data-link="' + esc(tgLink) + '" title="Copy link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> Copy link</button>'
         : "";
 
       const checkboxHtml = selectionMode
         ? '<span class="row-checkbox' + (isSelected ? ' checked' : '') + '"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
         : "";
-      const rowClick = selectionMode ? "toggleSelect(" + s.id + ")" : "toggleDetails(" + s.id + ")";
 
-      const mainRow = '<tr class="song-row' + (isOpen ? ' open' : '') + (isSelected ? ' selected' : '') + '" data-id="' + s.id + '" onclick="' + rowClick + '">' +
+      const mainRow = '<tr class="song-row' + (isOpen ? ' open' : '') + (isSelected ? ' selected' : '') + '" data-id="' + s.id + '">' +
         '<td class="cell-main"><span class="title-line">' + checkboxHtml + '<span class="title-cell">' + esc(s.title) + '</span></span><span class="artist-cell">' + esc(s.performer) + '</span></td>' +
         '<td class="cell-artist">' + esc(s.performer) + '</td>' +
         '<td class="cell-meta"><span class="dur-pill">' + fmtDuration(s.duration) + '</span></td>' +
@@ -608,7 +606,7 @@ export async function onRequestGet(context) {
             '<div><span class="detail-label">Message ID</span><span class="detail-value">' + esc(s.message_id) + '</span></div>' +
           '</div>' +
           '<div class="detail-actions">' + openBtn + copyBtn +
-            '<button class="btn btn-danger" onclick="event.stopPropagation(); askDelete(' + s.id + ', \'' + esc(s.title).replace(/'/g, "\\'") + '\')">Delete</button>' +
+            '<button class="btn btn-danger" data-action="delete" data-id="' + s.id + '" data-title="' + esc(s.title) + '">Delete</button>' +
           '</div>' +
         '</td>' +
       '</tr>';
@@ -645,25 +643,36 @@ export async function onRequestGet(context) {
   }
 
   function copyLink(link) {
-    navigator.clipboard?.writeText(link).then(
-      () => toast("Link copied"),
-      () => toast("Could not copy link", true)
-    );
+    if (!link) return;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(link).then(
+        () => toast("Link copied"),
+        () => toast("Could not copy link", true)
+      );
+    } else {
+      // fallback برای مرورگرهای قدیمی
+      const ta = document.createElement("textarea");
+      ta.value = link;
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand("copy"); toast("Link copied"); }
+      catch { toast("Could not copy link", true); }
+      document.body.removeChild(ta);
+    }
   }
 
   function askDelete(id, title) {
     pendingBulkDelete = false;
     pendingDeleteId = id;
-    document.getElementById("confirmModal").querySelector("p").innerHTML =
-      'Delete <b>' + esc(title || ("#" + id)) + '</b>?<br>This action cannot be undone.';
+    document.getElementById("confirmTitle").textContent = title || ("#" + id);
     document.getElementById("confirmModal").classList.add("show");
   }
 
   function askBulkDelete() {
     if (selectedIds.size === 0) return;
     pendingBulkDelete = true;
-    document.getElementById("confirmModal").querySelector("p").innerHTML =
-      'Delete <b>' + selectedIds.size + ' selected song' + (selectedIds.size > 1 ? "s" : "") + '</b>?<br>This action cannot be undone.';
+    document.getElementById("confirmTitle").textContent =
+      selectedIds.size + " selected song" + (selectedIds.size > 1 ? "s" : "");
     document.getElementById("confirmModal").classList.add("show");
   }
 
@@ -711,6 +720,37 @@ export async function onRequestGet(context) {
     if (failed > 0) toast(okIds.length + " deleted, " + failed + " failed", true);
     else toast(okIds.length + " song" + (okIds.length > 1 ? "s" : "") + " deleted");
   }
+
+  // ---------- event delegation: یک listener برای همه کلیک‌های جدول ----------
+  rowsEl.addEventListener("click", (e) => {
+    // دکمه‌ها/لینک‌هایی که data-action دارن
+    const actionEl = e.target.closest("[data-action]");
+    if (actionEl) {
+      const action = actionEl.dataset.action;
+      if (action === "stop") return; // لینک باز شود، ولی propagation نکنه
+      e.preventDefault();
+      e.stopPropagation();
+      if (action === "copy") copyLink(actionEl.dataset.link);
+      else if (action === "delete") askDelete(Number(actionEl.dataset.id), actionEl.dataset.title);
+      return;
+    }
+
+    // کلیک روی ردیف آهنگ (نه روی دکمه‌ها)
+    const row = e.target.closest("tr.song-row");
+    if (row) {
+      const id = Number(row.dataset.id);
+      if (selectionMode) toggleSelect(id);
+      else toggleDetails(id);
+      return;
+    }
+
+    // کلیک روی chevron
+    const chev = e.target.closest(".chevron-btn");
+    if (chev) {
+      const row2 = chev.closest("tr.song-row");
+      if (row2) toggleDetails(Number(row2.dataset.id));
+    }
+  });
 
   document.getElementById("confirmOk").addEventListener("click", () => {
     if (pendingBulkDelete) bulkDelete();
