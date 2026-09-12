@@ -89,7 +89,9 @@ async function handleMessage(msg, env) {
     await sendMessage(
       env,
       chatId,
-      "سلام 👋\nاسم آهنگ یا خواننده رو برام بفرست تا برات پیداش کنم 🎧"
+      "سلام، به بات NivaroMusic خوش اومدی🎉
+
+کافیه اسم آهنگ یا نام خواننده رو بفرستی تا پیدا کنم و برات بفرستم 🎧"
     );
     return;
   }
