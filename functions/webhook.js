@@ -86,15 +86,13 @@ async function handleMessage(msg, env) {
   }
 
   if (text.startsWith("/start")) {
-    await sendMessage(
-      env,
-      chatId,
-      "/n سلام، به بات NivaroMusic خوش اومدی🎉
-
-کافیه اسم آهنگ یا نام خواننده رو بفرستی تا پیدا کنم و برات بفرستم 🎧"
-    );
-    return;
-  }
+  await sendMessage(
+    env,
+    chatId,
+    "سلام، به بات NivaroMusic خوش اومدی🎉\n\nکافیه اسم آهنگ یا نام خواننده رو بفرستی تا پیدا کنم و برات بفرستم 🎧"
+  );
+  return;
+}
 
   if (!text) return;
 
