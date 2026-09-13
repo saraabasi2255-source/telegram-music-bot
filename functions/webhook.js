@@ -88,7 +88,31 @@ async function handleMessage(msg, env) {
   if (text.startsWith("/start")) {
     const payload = text.slice("/start".length).trim();
 
-    // اومده از دکمه‌ی «نسخه‌های دیگه‌ی این آهنگ» ⇒ فرمت: /start ver_<groupId>
+    // اومده از دکمه‌ی «جستجوی این آهنگ» ⇒ فرمت: /start q_<linkId>
+    // (بات دستیارِ پست‌گذاری وقتی پست می‌سازه، اسمِ آهنگ رو توی جدول
+    // search_links ذخیره می‌کنه و فقط شماره‌ش رو توی لینک می‌ذاره، چون
+    // لینک‌های تلگرام کاراکترهای فارسی رو قبول نمی‌کنن)
+    if (payload.startsWith("q_")) {
+      const linkId = Number(payload.slice("q_".length));
+      if (Number.isInteger(linkId) && linkId > 0) {
+        const link = await env.DB.prepare(`SELECT query FROM search_links WHERE id = ?1`)
+          .bind(linkId)
+          .first();
+        if (link && link.query) {
+          const results = await searchSongs(env, link.query, 100);
+          if (results.length === 0) {
+            await sendNoResultsMessage(env, chatId, null, link.query);
+          } else if (results.length === 1) {
+            await deliverSong(env, chatId, results[0], null);
+          } else {
+            await sendResultsPage(env, chatId, results, 0, link.query, null);
+          }
+          return;
+        }
+      }
+    }
+
+    // اومده از دکمه‌ی قدیمی‌تر «نسخه‌های دیگه‌ی این آهنگ» ⇒ فرمت: /start ver_<groupId>
     if (payload.startsWith("ver_")) {
       const groupId = Number(payload.slice("ver_".length));
       if (Number.isInteger(groupId) && groupId > 0) {
