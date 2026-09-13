@@ -60,7 +60,7 @@ async function handleChannelPost(msg, env) {
   await env.DB.prepare(
     `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-     ON CONFLICT(chat_id, message_id) DO UPDATE SET
+     ON CONFLICT(message_id) DO UPDATE SET
        chat_id = excluded.chat_id,
        title = excluded.title,
        performer = excluded.performer,
