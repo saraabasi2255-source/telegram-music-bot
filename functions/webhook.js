@@ -313,37 +313,57 @@ function tokenize(s) {
   return normalizeText(s).split(" ").filter(Boolean);
 }
 
-// فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم بشه تا یکی بشن) —
-// برای تحمل اشتباه تایپیِ جزئی استفاده می‌شه
+// فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم/جابه‌جا بشه تا یکی
+// بشن) — جابه‌جاییِ دو حرفِ کناری (مثلا believer ↔ beleiver، خیلی رایجه)
+// رو هم یه اشتباهِ تایپیِ واحد حساب می‌کنه، نه دوتا
 function levenshtein(a, b) {
   const m = a.length,
     n = b.length;
   if (!m) return n;
   if (!n) return m;
-  const dp = new Array(n + 1);
-  for (let j = 0; j <= n; j++) dp[j] = j;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
   for (let i = 1; i <= m; i++) {
-    let prevDiag = dp[0];
-    dp[0] = i;
     for (let j = 1; j <= n; j++) {
-      const temp = dp[j];
-      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prevDiag + (a[i - 1] === b[j - 1] ? 0 : 1));
-      prevDiag = temp;
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1); // جابه‌جاییِ دو حرفِ کناری
+      }
     }
   }
-  return dp[n];
+  return dp[m][n];
 }
 
 // دو کلمه رو «تقریبا یکی» حساب می‌کنه اگه فرقشون فقط یکی-دو حرفِ جزئی
-// باشه (اشتباه تایپی)، نه یه کلمه‌ی کاملا متفاوت
+// باشه (اشتباه تایپی)، نه یه کلمه‌ی کاملا متفاوت. هرچی کلمه بلندتر باشه،
+// یکم بیشتر تحمل می‌کنیم (یه اشتباه توی یه کلمه‌ی ۱۰ حرفی طبیعی‌تره تا
+// توی یه کلمه‌ی ۴ حرفی)
 function wordsAreClose(a, b) {
-  if (a === b) return true;
   if (!a || !b) return false;
-  if (a.includes(b) || b.includes(a)) return true; // مثلا جمع/مفرد یا زیرمجموعه
   const maxLen = Math.max(a.length, b.length);
-  if (maxLen < 3) return false; // کلمه‌های خیلی کوتاه رو fuzzy نکن، اشتباه تشخیص می‌ده
+  if (maxLen < 3) return false;
   const dist = levenshtein(a, b);
-  return dist <= Math.max(1, Math.floor(maxLen * 0.2));
+  const allowed = maxLen <= 5 ? 1 : maxLen <= 9 ? 2 : 3;
+  return dist <= allowed;
+}
+
+// چقدر یه کلمه‌ی موجود توی آهنگ (rt) با یه کلمه‌ی جستجوشده (qt) نزدیکه؟
+// عدد بین 0 (هیچ ربطی نداره) تا 1 (کاملا یکی) برمی‌گردونه. این عدده که
+// باعث می‌شه توی لیست نهایی، مطابقت‌های دقیق‌تر بالاتر از مطابقت‌های
+// ضعیف‌تر/تقریبی قرار بگیرن.
+function tokenMatchScore(rt, qt) {
+  if (rt === qt) return 1;
+  if (rt.includes(qt) || qt.includes(rt)) {
+    const longer = Math.max(rt.length, qt.length);
+    const shorter = Math.min(rt.length, qt.length);
+    return 0.85 * (shorter / longer); // زیرمجموعه‌ست، ولی هرچی طولش به هم نزدیک‌تر باشه امتیازش بیشتره
+  }
+  if (!wordsAreClose(rt, qt)) return 0;
+  const maxLen = Math.max(rt.length, qt.length);
+  const dist = levenshtein(rt, qt);
+  return 0.6 * (1 - dist / maxLen); // اشتباه تایپی بود، ولی امتیازش از تطبیق دقیق کمتره
 }
 
 // تعداد آیتم در هر صفحه
@@ -351,14 +371,15 @@ const PAGE_SIZE = 7;
 
 // جستجو در دیتابیس (تا سقف limit)
 //
-// روش کار: به‌جای LIKE ساده (که به فونت حساسه و فقط یه ستون رو چک می‌کنه)،
-// عبارتِ جستجو رو کلمه‌کلمه می‌کنیم و برای هر آهنگ چک می‌کنیم که همه‌ی
-// کلمه‌های جستجو (چه از اسم آهنگ باشن چه خواننده، به هر ترتیبی که نوشته
-// شده باشن) یه‌جایی توی عنوان/خواننده/نام‌فایل/کپشنِ اون آهنگ پیدا بشن —
-// با تحمل نسبت به تفاوت حروف عربی/فارسی و اشتباه تایپیِ جزئی.
+// روش کار: عبارتِ جستجو رو کلمه‌کلمه می‌کنیم و برای هر آهنگ، به هر کلمه
+// یه امتیازِ شباهت (0 تا 1) می‌دیم؛ اگه حتی یه کلمه هیچ شباهتی نداشت، اون
+// آهنگ کلا حذف می‌شه. آهنگ‌هایی که موندن، بر اساس مجموع امتیازشون مرتب
+// می‌شن — یعنی مطابقت‌های خیلی دقیق اول لیست، و مطابقت‌های ضعیف‌تر/تقریبی
+// (که فقط به‌خاطر تحمل اشتباه تایپی رد شدن) ته لیست قرار می‌گیرن.
 async function searchSongs(env, q, limit = 100) {
   const queryTokens = tokenize(q);
   if (queryTokens.length === 0) return [];
+  const normQuery = normalizeText(q);
 
   const { results } = await env.DB.prepare(
     `SELECT id, chat_id, message_id, title, performer, caption, file_name FROM songs`
@@ -366,33 +387,38 @@ async function searchSongs(env, q, limit = 100) {
 
   const scored = [];
   for (const row of results) {
-    const rowTokens = tokenize(
+    const combinedNorm = normalizeText(
       [row.title, row.performer, row.file_name, row.caption].filter(Boolean).join(" ")
     );
+    const rowTokens = combinedNorm.split(" ").filter(Boolean);
     if (rowTokens.length === 0) continue;
 
+    let totalScore = 0;
     let allMatched = true;
-    let exactCount = 0;
     for (const qt of queryTokens) {
-      const hit = rowTokens.some((rt) => {
-        if (rt === qt || rt.includes(qt) || qt.includes(rt)) {
-          exactCount++;
-          return true;
-        }
-        return wordsAreClose(rt, qt);
-      });
-      if (!hit) {
+      let best = 0;
+      for (const rt of rowTokens) {
+        const s = tokenMatchScore(rt, qt);
+        if (s > best) best = s;
+      }
+      if (best <= 0) {
         allMatched = false;
         break;
       }
+      totalScore += best;
     }
     if (!allMatched) continue;
 
-    scored.push({ row, exactCount, len: (row.title || row.file_name || "").length });
+    // امتیاز اضافه اگه کل عبارتِ جستجو، دقیقا همونجوری که نوشته شده،
+    // یه‌جا توی عنوان/خواننده/کپشن پیدا بشه (یعنی خیلی دقیق مطابقت داره)
+    if (combinedNorm.includes(normQuery)) totalScore += 5;
+
+    const avgScore = totalScore / queryTokens.length;
+    scored.push({ row, avgScore, len: (row.title || row.file_name || "").length });
   }
 
-  // اول اونایی که دقیق‌تر مطابقت داشتن، بعد اسم‌های کوتاه‌تر (احتمالا دقیق‌تر)
-  scored.sort((a, b) => b.exactCount - a.exactCount || a.len - b.len);
+  // دقیق‌ترین‌ها اول، ضعیف‌ترین‌ها ته لیست
+  scored.sort((a, b) => b.avgScore - a.avgScore || a.len - b.len);
 
   return scored.slice(0, limit).map((s) => s.row);
 }
