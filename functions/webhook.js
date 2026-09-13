@@ -60,7 +60,7 @@ async function handleChannelPost(msg, env) {
   await env.DB.prepare(
     `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-     ON CONFLICT(message_id) DO UPDATE SET
+     ON CONFLICT(chat_id, message_id) DO UPDATE SET
        chat_id = excluded.chat_id,
        title = excluded.title,
        performer = excluded.performer,
@@ -284,33 +284,117 @@ async function handleCallbackQuery(cq, env) {
   await answerCallbackQuery(env, cq.id);
 }
 
-// ── توابع کمکی ────────────────────────────────────────────────
+// ── نرمال‌سازی متن فارسی/عربی ──────────────────────────────────
+// خیلی از «پیدا نشدن»ها به‌خاطر اینه که کاربر یا فایل از یه شکلِ دیگه‌ی
+// همون حرف استفاده کرده (ی عربی به‌جای ی فارسی، ك عربی به‌جای ک فارسی،
+// اعراب، نیم‌فاصله، اعداد عربی/فارسی و ...) که از نظر ظاهری فرقی ندارن
+// ولی از نظر کدِ کامپیوتری کاملا متفاوتن. این تابع همه‌شونو یکی می‌کنه.
+function normalizeText(s) {
+  if (!s) return "";
+  return s
+    .toString()
+    .replace(/[\u064B-\u065F\u0610-\u061A\u06D6-\u06ED\u0670]/g, "") // اعراب/تشکیل
+    .replace(/[إأآا]/g, "ا")
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/ة/g, "ه")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ی")
+    .replace(/[\u200c\u200e\u200f]/g, " ") // نیم‌فاصله و کاراکترهای جهت‌دار
+    .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // علائم نگارشی حذف بشه، فقط حرف/عدد/فاصله بمونه
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(s) {
+  return normalizeText(s).split(" ").filter(Boolean);
+}
+
+// فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم بشه تا یکی بشن) —
+// برای تحمل اشتباه تایپیِ جزئی استفاده می‌شه
+function levenshtein(a, b) {
+  const m = a.length,
+    n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prevDiag = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const temp = dp[j];
+      dp[j] = Math.min(dp[j] + 1, dp[j - 1] + 1, prevDiag + (a[i - 1] === b[j - 1] ? 0 : 1));
+      prevDiag = temp;
+    }
+  }
+  return dp[n];
+}
+
+// دو کلمه رو «تقریبا یکی» حساب می‌کنه اگه فرقشون فقط یکی-دو حرفِ جزئی
+// باشه (اشتباه تایپی)، نه یه کلمه‌ی کاملا متفاوت
+function wordsAreClose(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.includes(b) || b.includes(a)) return true; // مثلا جمع/مفرد یا زیرمجموعه
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 3) return false; // کلمه‌های خیلی کوتاه رو fuzzy نکن، اشتباه تشخیص می‌ده
+  const dist = levenshtein(a, b);
+  return dist <= Math.max(1, Math.floor(maxLen * 0.2));
+}
 
 // تعداد آیتم در هر صفحه
 const PAGE_SIZE = 7;
 
 // جستجو در دیتابیس (تا سقف limit)
+//
+// روش کار: به‌جای LIKE ساده (که به فونت حساسه و فقط یه ستون رو چک می‌کنه)،
+// عبارتِ جستجو رو کلمه‌کلمه می‌کنیم و برای هر آهنگ چک می‌کنیم که همه‌ی
+// کلمه‌های جستجو (چه از اسم آهنگ باشن چه خواننده، به هر ترتیبی که نوشته
+// شده باشن) یه‌جایی توی عنوان/خواننده/نام‌فایل/کپشنِ اون آهنگ پیدا بشن —
+// با تحمل نسبت به تفاوت حروف عربی/فارسی و اشتباه تایپیِ جزئی.
 async function searchSongs(env, q, limit = 100) {
-  const like = `%${q}%`;
-  const startsWith = `${q}%`;
+  const queryTokens = tokenize(q);
+  if (queryTokens.length === 0) return [];
 
-  const stmt = env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, caption
-     FROM songs
-     WHERE title LIKE ?1 OR performer LIKE ?1 OR file_name LIKE ?1 OR caption LIKE ?1
-     ORDER BY
-       CASE
-         WHEN title LIKE ?2 THEN 0
-         WHEN performer LIKE ?2 THEN 1
-         WHEN file_name LIKE ?2 THEN 2
-         ELSE 3
-       END,
-       length(COALESCE(title, file_name, '')) ASC
-     LIMIT ?3`
-  ).bind(like, startsWith, limit);
+  const { results } = await env.DB.prepare(
+    `SELECT id, chat_id, message_id, title, performer, caption, file_name FROM songs`
+  ).all();
 
-  const { results } = await stmt.all();
-  return results;
+  const scored = [];
+  for (const row of results) {
+    const rowTokens = tokenize(
+      [row.title, row.performer, row.file_name, row.caption].filter(Boolean).join(" ")
+    );
+    if (rowTokens.length === 0) continue;
+
+    let allMatched = true;
+    let exactCount = 0;
+    for (const qt of queryTokens) {
+      const hit = rowTokens.some((rt) => {
+        if (rt === qt || rt.includes(qt) || qt.includes(rt)) {
+          exactCount++;
+          return true;
+        }
+        return wordsAreClose(rt, qt);
+      });
+      if (!hit) {
+        allMatched = false;
+        break;
+      }
+    }
+    if (!allMatched) continue;
+
+    scored.push({ row, exactCount, len: (row.title || row.file_name || "").length });
+  }
+
+  // اول اونایی که دقیق‌تر مطابقت داشتن، بعد اسم‌های کوتاه‌تر (احتمالا دقیق‌تر)
+  scored.sort((a, b) => b.exactCount - a.exactCount || a.len - b.len);
+
+  return scored.slice(0, limit).map((s) => s.row);
 }
 
 // پیام «نتیجه‌ای پیدا نشد» با ظاهر مورد نظر (شبیه اسکرین‌شات):
