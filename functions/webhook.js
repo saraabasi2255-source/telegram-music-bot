@@ -375,9 +375,13 @@ function levenshtein(a, b) {
 function wordsAreClose(a, b) {
   if (!a || !b) return false;
   const maxLen = Math.max(a.length, b.length);
-  if (maxLen < 3) return false;
+  // کلمه‌های کوتاه رو fuzzy نکن — مثلا «rain» و «main» فقط یه حرف فرق
+  // دارن ولی کاملا دو کلمه‌ی متفاوتن؛ فقط برای کلمه‌های نسبتا بلند (که
+  // اشتباه تایپی توشون طبیعی‌تره و کمتر باعث قاطی‌شدن با یه کلمه‌ی
+  // دیگه می‌شه) این تحمل رو اعمال می‌کنیم
+  if (maxLen < 5) return false;
   const dist = levenshtein(a, b);
-  const allowed = maxLen <= 5 ? 1 : maxLen <= 9 ? 2 : 3;
+  const allowed = maxLen <= 7 ? 1 : maxLen <= 10 ? 2 : 3;
   return dist <= allowed;
 }
 
@@ -408,9 +412,11 @@ async function searchSongs(env, q, limit = 100) {
 
   const scored = [];
   for (const row of results) {
-    const combinedNorm = normalizeText(
-      [row.title, row.performer, row.file_name, row.caption].filter(Boolean).join(" ")
-    );
+    // عمداً فقط عنوان و خواننده رو حساب می‌کنیم، نه کپشن یا نام فایل —
+    // چون کپشن‌ها معمولا یه قالب مشترک و ثابت دارن (مثلا «Track / Artist /
+    // NivaroMusic») و اگه توی جستجو حساب بشن، کلمه‌های عمومیِ اون قالب
+    // باعث می‌شن آهنگ‌های کاملا نامربوط هم توی نتیجه بیان.
+    const combinedNorm = normalizeText([row.title, row.performer].filter(Boolean).join(" "));
     const rowTokens = combinedNorm.split(" ").filter(Boolean);
     if (rowTokens.length === 0) continue;
 
