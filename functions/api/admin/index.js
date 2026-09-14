@@ -426,7 +426,7 @@ export async function onRequestGet(context) {
 </div>
 
 <script>
-  // ---------- global error handlers (روی صفحه نشون بده) ----------
+  // ---------- global error handlers ----------
   function showError(msg) {
     var b = document.getElementById("errorBanner");
     if (!b) return;
@@ -840,7 +840,6 @@ export async function onRequestGet(context) {
     else toast(okIds.length + " song" + (okIds.length > 1 ? "s" : "") + " deleted");
   }
 
-  // ---------- event delegation ----------
   rowsEl.addEventListener("click", function (e) {
     var actionEl = e.target.closest("[data-action]");
     if (actionEl) {
