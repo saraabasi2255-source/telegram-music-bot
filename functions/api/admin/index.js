@@ -10,6 +10,12 @@ export async function onRequestGet(context) {
     return new Response("forbidden", { status: 403 });
   }
 
+  // چنل‌های آرشیوِ تعریف‌شده (یک یا دو تا) — برای فیلتر «Archive» توی پنل
+  const archives = [
+    env.ARCHIVE_CHAT_ID ? { id: String(env.ARCHIVE_CHAT_ID), label: "Archive 1" } : null,
+    env.ARCHIVE_CHAT_ID_2 ? { id: String(env.ARCHIVE_CHAT_ID_2), label: "Archive 2" } : null,
+  ].filter(Boolean);
+
   const html = `<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
@@ -325,6 +331,7 @@ export async function onRequestGet(context) {
     </div>
 
     <div class="controls">
+      ${archives.length > 1 ? '<select id="archiveFilter">\n        <option value="">All archives</option>\n        ' + archives.map(a => '<option value="' + a.id + '">' + a.label + '</option>').join("\n        ") + '\n      </select>' : ''}
       <select id="performerFilter">
         <option value="">All artists</option>
       </select>
@@ -411,11 +418,13 @@ export async function onRequestGet(context) {
 <!-- ================= client JS ================= -->
 <script>
   const KEY = new URLSearchParams(location.search).get("key") || "";
+  const ARCHIVES = ${JSON.stringify(archives)};
   const qInput = document.getElementById("q");
   const rowsEl = document.getElementById("rows");
   const statsEl = document.getElementById("stats");
   const toastEl = document.getElementById("toast");
   const performerFilter = document.getElementById("performerFilter");
+  const archiveFilter = document.getElementById("archiveFilter"); // ممکنه null باشه (فقط یه آرشیو)
   const sortSelect = document.getElementById("sortSelect");
   const pagerEl = document.getElementById("pager");
   const pagerInfo = document.getElementById("pagerInfo");
@@ -511,8 +520,10 @@ export async function onRequestGet(context) {
   function getFiltered() {
     const q = qInput.value.trim().toLowerCase();
     const performer = performerFilter.value;
+    const archiveId = archiveFilter ? archiveFilter.value : "";
     let list = allSongs.filter(s =>
       (!performer || s.performer === performer) &&
+      (!archiveId || String(s.chat_id) === archiveId) &&
       (!q ||
         (s.title || "").toLowerCase().includes(q) ||
         (s.performer || "").toLowerCase().includes(q) ||
@@ -598,11 +609,12 @@ export async function onRequestGet(context) {
         '<td class="chevron-cell"><button class="chevron-btn" aria-label="Toggle details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button></td>' +
       '</tr>';
 
+      const archiveLabel = (ARCHIVES.find(a => a.id === String(s.chat_id)) || {}).label;
       const detailRow = '<tr class="detail-row' + (isOpen ? '' : ' hidden') + '" data-detail-for="' + s.id + '">' +
         '<td colspan="5">' +
           '<div class="detail-grid">' +
             '<div><span class="detail-label">File name</span><span class="detail-value">' + esc(s.file_name) + '</span></div>' +
-            '<div><span class="detail-label">Chat ID</span><span class="detail-value">' + esc(s.chat_id) + '</span></div>' +
+            '<div><span class="detail-label">Chat ID</span><span class="detail-value">' + esc(s.chat_id) + (archiveLabel ? ' (' + esc(archiveLabel) + ')' : '') + '</span></div>' +
             '<div><span class="detail-label">Message ID</span><span class="detail-value">' + esc(s.message_id) + '</span></div>' +
           '</div>' +
           '<div class="detail-actions">' + openBtn + copyBtn +
@@ -810,6 +822,7 @@ export async function onRequestGet(context) {
 
   qInput.addEventListener("input", () => { currentPage = 1; render(); });
   performerFilter.addEventListener("change", () => { currentPage = 1; render(); });
+  if (archiveFilter) archiveFilter.addEventListener("change", () => { currentPage = 1; render(); });
   sortSelect.addEventListener("change", () => { currentPage = 1; render(); });
   pageSizeSelect.addEventListener("change", () => {
     PAGE_SIZE = parseInt(pageSizeSelect.value, 10) || 15;
