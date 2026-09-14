@@ -39,13 +39,17 @@ async function handleChannelPost(msg, env) {
   const audio = msg.audio;
   if (!audio) return; // فقط فایل‌های صوتی (audio) رو ثبت می‌کنیم
 
-  // 👇 فقط از چنل آرشیو ذخیره کن، نه از چنل اصلی
-  const archiveChatId = env.ARCHIVE_CHAT_ID ? String(env.ARCHIVE_CHAT_ID) : null;
-  if (!archiveChatId) {
+  // 👇 فقط از چنل(های) آرشیو ذخیره کن، نه از چنل اصلی/پابلیک
+  // می‌تونی یک یا دو چنلِ آرشیو داشته باشی (ARCHIVE_CHAT_ID و ARCHIVE_CHAT_ID_2)
+  const archiveIds = [env.ARCHIVE_CHAT_ID, env.ARCHIVE_CHAT_ID_2]
+    .filter(Boolean)
+    .map(String);
+
+  if (archiveIds.length === 0) {
     console.warn("ARCHIVE_CHAT_ID تنظیم نشده - هیچ آهنگی ذخیره نمی‌شه");
     return;
   }
-  if (String(msg.chat.id) !== archiveChatId) {
+  if (!archiveIds.includes(String(msg.chat.id))) {
     // پیام از چنل اصلی یا هر جای دیگه ⇒ نادیده بگیر
     return;
   }
@@ -57,16 +61,20 @@ async function handleChannelPost(msg, env) {
   const caption = msg.caption || null;
   const duration = audio.duration || null;
 
+  // نکته: group_id رو اینجا دست نمی‌زنیم (null می‌فرستیم) چون این تابع
+  // فقط ایندکس‌کردنِ خودکارِ پیام‌های چنله؛ اگه بات دستیار (webhook-poster.js)
+  // قبلا group_id این پیام رو ست کرده باشه، با COALESCE دست‌نخورده می‌مونه
   await env.DB.prepare(
-    `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration)
-     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+    `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration, group_id)
+     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
      ON CONFLICT(message_id) DO UPDATE SET
        chat_id = excluded.chat_id,
        title = excluded.title,
        performer = excluded.performer,
        file_name = excluded.file_name,
        caption = excluded.caption,
-       duration = excluded.duration`
+       duration = excluded.duration,
+       group_id = COALESCE(songs.group_id, excluded.group_id)`
   )
     .bind(chatId, msg.message_id, title, performer, fileName, caption, duration)
     .run();
@@ -86,37 +94,14 @@ async function handleMessage(msg, env) {
   }
 
   if (text.startsWith("/start")) {
+    // لینک شیشه‌ای «نسخه‌های دیگه‌ی این آهنگ» به شکل زیر بات رو باز می‌کنه:
+    // https://t.me/<bot_username>?start=ver_<groupId>
+    // که تلگرام خودش به‌صورت پیام «/start ver_<groupId>» برامون می‌فرسته
     const payload = text.slice("/start".length).trim();
-
-    // اومده از دکمه‌ی «جستجوی این آهنگ» ⇒ فرمت: /start q_<linkId>
-    // (بات دستیارِ پست‌گذاری وقتی پست می‌سازه، اسمِ آهنگ رو توی جدول
-    // search_links ذخیره می‌کنه و فقط شماره‌ش رو توی لینک می‌ذاره، چون
-    // لینک‌های تلگرام کاراکترهای فارسی رو قبول نمی‌کنن)
-    if (payload.startsWith("q_")) {
-      const linkId = Number(payload.slice("q_".length));
-      if (Number.isInteger(linkId) && linkId > 0) {
-        const link = await env.DB.prepare(`SELECT query FROM search_links WHERE id = ?1`)
-          .bind(linkId)
-          .first();
-        if (link && link.query) {
-          const results = await searchSongs(env, link.query, 100);
-          if (results.length === 0) {
-            await sendNoResultsMessage(env, chatId, null, link.query);
-          } else if (results.length === 1) {
-            await deliverSong(env, chatId, results[0], null);
-          } else {
-            await sendResultsPage(env, chatId, results, 0, link.query, null);
-          }
-          return;
-        }
-      }
-    }
-
-    // اومده از دکمه‌ی قدیمی‌تر «نسخه‌های دیگه‌ی این آهنگ» ⇒ فرمت: /start ver_<groupId>
     if (payload.startsWith("ver_")) {
       const groupId = Number(payload.slice("ver_".length));
       if (Number.isInteger(groupId) && groupId > 0) {
-        await sendGroupVersions(env, chatId, groupId);
+        await deliverGroupVersions(env, chatId, groupId, msg.message_id);
         return;
       }
     }
@@ -188,7 +173,7 @@ async function handleCallbackQuery(cq, env) {
   if (data.startsWith("song:")) {
     const id = Number(data.slice("song:".length));
     const song = await env.DB.prepare(
-      `SELECT id, chat_id, message_id, title, performer, caption FROM songs WHERE id = ?1`
+      `SELECT id, chat_id, message_id, title, performer, caption, group_id FROM songs WHERE id = ?1`
     )
       .bind(id)
       .first();
@@ -281,146 +266,46 @@ async function handleCallbackQuery(cq, env) {
     return;
   }
 
+  // ⑤ «نسخه‌های دیگه‌ی این آهنگ» — زیر آهنگی که همین‌جا (با سرچ) تحویل داده شده
+  else if (data.startsWith("showver:")) {
+    const groupId = Number(data.slice("showver:".length));
+    await answerCallbackQuery(env, cq.id);
+    if (Number.isInteger(groupId) && groupId > 0) {
+      await deliverGroupVersions(env, chatId, groupId, 0);
+    }
+    return;
+  }
+
   await answerCallbackQuery(env, cq.id);
 }
 
-// ── نرمال‌سازی متن فارسی/عربی ──────────────────────────────────
-// خیلی از «پیدا نشدن»ها به‌خاطر اینه که کاربر یا فایل از یه شکلِ دیگه‌ی
-// همون حرف استفاده کرده (ی عربی به‌جای ی فارسی، ك عربی به‌جای ک فارسی،
-// اعراب، نیم‌فاصله، اعداد عربی/فارسی و ...) که از نظر ظاهری فرقی ندارن
-// ولی از نظر کدِ کامپیوتری کاملا متفاوتن. این تابع همه‌شونو یکی می‌کنه.
-function normalizeText(s) {
-  if (!s) return "";
-  return s
-    .toString()
-    .replace(/[\u064B-\u065F\u0610-\u061A\u06D6-\u06ED\u0670]/g, "") // اعراب/تشکیل
-    .replace(/[إأآا]/g, "ا")
-    .replace(/ي/g, "ی")
-    .replace(/ك/g, "ک")
-    .replace(/ة/g, "ه")
-    .replace(/ؤ/g, "و")
-    .replace(/ئ/g, "ی")
-    .replace(/[\u200c\u200e\u200f]/g, " ") // نیم‌فاصله و کاراکترهای جهت‌دار
-    .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
-    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}\s]/gu, " ") // علائم نگارشی حذف بشه، فقط حرف/عدد/فاصله بمونه
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function tokenize(s) {
-  return normalizeText(s).split(" ").filter(Boolean);
-}
-
-// فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم/جابه‌جا بشه تا یکی
-// بشن) — جابه‌جاییِ دو حرفِ کناری (مثلا believer ↔ beleiver، خیلی رایجه)
-// رو هم یه اشتباهِ تایپیِ واحد حساب می‌کنه، نه دوتا
-function levenshtein(a, b) {
-  const m = a.length,
-    n = b.length;
-  if (!m) return n;
-  if (!n) return m;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 0; i <= m; i++) dp[i][0] = i;
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1); // جابه‌جاییِ دو حرفِ کناری
-      }
-    }
-  }
-  return dp[m][n];
-}
-
-// دو کلمه رو «تقریبا یکی» حساب می‌کنه اگه فرقشون فقط یکی-دو حرفِ جزئی
-// باشه (اشتباه تایپی)، نه یه کلمه‌ی کاملا متفاوت. هرچی کلمه بلندتر باشه،
-// یکم بیشتر تحمل می‌کنیم (یه اشتباه توی یه کلمه‌ی ۱۰ حرفی طبیعی‌تره تا
-// توی یه کلمه‌ی ۴ حرفی)
-function wordsAreClose(a, b) {
-  if (!a || !b) return false;
-  const maxLen = Math.max(a.length, b.length);
-  if (maxLen < 3) return false;
-  const dist = levenshtein(a, b);
-  const allowed = maxLen <= 5 ? 1 : maxLen <= 9 ? 2 : 3;
-  return dist <= allowed;
-}
-
-// چقدر یه کلمه‌ی موجود توی آهنگ (rt) با یه کلمه‌ی جستجوشده (qt) نزدیکه؟
-// عدد بین 0 (هیچ ربطی نداره) تا 1 (کاملا یکی) برمی‌گردونه. این عدده که
-// باعث می‌شه توی لیست نهایی، مطابقت‌های دقیق‌تر بالاتر از مطابقت‌های
-// ضعیف‌تر/تقریبی قرار بگیرن.
-function tokenMatchScore(rt, qt) {
-  if (rt === qt) return 1;
-  if (rt.includes(qt) || qt.includes(rt)) {
-    const longer = Math.max(rt.length, qt.length);
-    const shorter = Math.min(rt.length, qt.length);
-    return 0.85 * (shorter / longer); // زیرمجموعه‌ست، ولی هرچی طولش به هم نزدیک‌تر باشه امتیازش بیشتره
-  }
-  if (!wordsAreClose(rt, qt)) return 0;
-  const maxLen = Math.max(rt.length, qt.length);
-  const dist = levenshtein(rt, qt);
-  return 0.6 * (1 - dist / maxLen); // اشتباه تایپی بود، ولی امتیازش از تطبیق دقیق کمتره
-}
+// ── توابع کمکی ────────────────────────────────────────────────
 
 // تعداد آیتم در هر صفحه
 const PAGE_SIZE = 7;
 
 // جستجو در دیتابیس (تا سقف limit)
-//
-// روش کار: عبارتِ جستجو رو کلمه‌کلمه می‌کنیم و برای هر آهنگ، به هر کلمه
-// یه امتیازِ شباهت (0 تا 1) می‌دیم؛ اگه حتی یه کلمه هیچ شباهتی نداشت، اون
-// آهنگ کلا حذف می‌شه. آهنگ‌هایی که موندن، بر اساس مجموع امتیازشون مرتب
-// می‌شن — یعنی مطابقت‌های خیلی دقیق اول لیست، و مطابقت‌های ضعیف‌تر/تقریبی
-// (که فقط به‌خاطر تحمل اشتباه تایپی رد شدن) ته لیست قرار می‌گیرن.
 async function searchSongs(env, q, limit = 100) {
-  const queryTokens = tokenize(q);
-  if (queryTokens.length === 0) return [];
-  const normQuery = normalizeText(q);
+  const like = `%${q}%`;
+  const startsWith = `${q}%`;
 
-  const { results } = await env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, caption, file_name FROM songs`
-  ).all();
+  const stmt = env.DB.prepare(
+    `SELECT id, chat_id, message_id, title, performer, caption, group_id
+     FROM songs
+     WHERE title LIKE ?1 OR performer LIKE ?1 OR file_name LIKE ?1 OR caption LIKE ?1
+     ORDER BY
+       CASE
+         WHEN title LIKE ?2 THEN 0
+         WHEN performer LIKE ?2 THEN 1
+         WHEN file_name LIKE ?2 THEN 2
+         ELSE 3
+       END,
+       length(COALESCE(title, file_name, '')) ASC
+     LIMIT ?3`
+  ).bind(like, startsWith, limit);
 
-  const scored = [];
-  for (const row of results) {
-    const combinedNorm = normalizeText(
-      [row.title, row.performer, row.file_name, row.caption].filter(Boolean).join(" ")
-    );
-    const rowTokens = combinedNorm.split(" ").filter(Boolean);
-    if (rowTokens.length === 0) continue;
-
-    let totalScore = 0;
-    let allMatched = true;
-    for (const qt of queryTokens) {
-      let best = 0;
-      for (const rt of rowTokens) {
-        const s = tokenMatchScore(rt, qt);
-        if (s > best) best = s;
-      }
-      if (best <= 0) {
-        allMatched = false;
-        break;
-      }
-      totalScore += best;
-    }
-    if (!allMatched) continue;
-
-    // امتیاز اضافه اگه کل عبارتِ جستجو، دقیقا همونجوری که نوشته شده،
-    // یه‌جا توی عنوان/خواننده/کپشن پیدا بشه (یعنی خیلی دقیق مطابقت داره)
-    if (combinedNorm.includes(normQuery)) totalScore += 5;
-
-    const avgScore = totalScore / queryTokens.length;
-    scored.push({ row, avgScore, len: (row.title || row.file_name || "").length });
-  }
-
-  // دقیق‌ترین‌ها اول، ضعیف‌ترین‌ها ته لیست
-  scored.sort((a, b) => b.avgScore - a.avgScore || a.len - b.len);
-
-  return scored.slice(0, limit).map((s) => s.row);
+  const { results } = await stmt.all();
+  return results;
 }
 
 // پیام «نتیجه‌ای پیدا نشد» با ظاهر مورد نظر (شبیه اسکرین‌شات):
@@ -512,31 +397,6 @@ function buildLabel(song) {
   return label.length > 64 ? label.slice(0, 61) + "..." : label;
 }
 
-// همه‌ی نسخه‌های ثبت‌شده‌ی یه گروه آهنگ (مثلا نرمال + اسپید + اسلو) رو
-// پشت‌سرهم برای کاربر می‌فرسته — از دکمه‌ی «نسخه‌های دیگه‌ی این آهنگ»
-// (که بات دستیارِ پست‌گذاری می‌سازه) صدا زده می‌شه: /start ver_<groupId>
-async function sendGroupVersions(env, chatId, groupId) {
-  const { results } = await env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, caption
-     FROM songs
-     WHERE group_id = ?1
-     ORDER BY id ASC`
-  )
-    .bind(groupId)
-    .all();
-
-  if (!results || results.length === 0) {
-    await sendMessage(env, chatId, "نسخه‌ای برای این آهنگ پیدا نشد 🙁");
-    return;
-  }
-
-  await sendMessage(env, chatId, `🎧 ${results.length} نسخه از این آهنگ پیدا شد:`);
-
-  for (const song of results) {
-    await deliverSong(env, chatId, song, 0);
-  }
-}
-
 // آهنگ رو دقیقاً با همون کپشن اصلی‌اش برای کاربر کپی می‌کنه
 // اگه پیام اصلی تو چنل آرشیو پاک شده باشه، رکورد رو از دیتابیس هم حذف می‌کنه
 // userMessageId (اختیاری): پیامی که کاربر باهاش سرچ کرده؛ وقتی دکمه‌ی Close
@@ -551,11 +411,14 @@ async function deliverSong(env, toChatId, song, userMessageId) {
     return;
   }
 
-  const reply_markup = {
-    inline_keyboard: [
-      [{ text: "Close", callback_data: `close_song:${userMessageId || 0}` }],
-    ],
-  };
+  const rows = [];
+  if (song.group_id) {
+    rows.push([
+      { text: "🎧 نسخه‌های دیگه‌ی این آهنگ", callback_data: `showver:${song.group_id}` },
+    ]);
+  }
+  rows.push([{ text: "Close", callback_data: `close_song:${userMessageId || 0}` }]);
+  const reply_markup = { inline_keyboard: rows };
 
   const res = await fetch(
     `https://api.telegram.org/bot${env.BOT_TOKEN}/copyMessage`,
@@ -593,6 +456,36 @@ async function deliverSong(env, toChatId, song, userMessageId) {
       return;
     }
     await sendMessage(env, toChatId, "ارسال آهنگ با خطا مواجه شد.");
+  }
+}
+
+// ── ارسال «نسخه‌های دیگه‌ی یک آهنگ» پشت سر هم ─────────────────
+// groupId توسط بات دستیارِ پست‌گذاری (webhook-poster.js) موقع پست کردن
+// هر آهنگ توی کانال ساخته/استفاده می‌شه (جدول song_groups)
+async function deliverGroupVersions(env, chatId, groupId, userMessageId) {
+  const { results } = await env.DB.prepare(
+    `SELECT id, chat_id, message_id, title, performer, caption, group_id
+     FROM songs
+     WHERE group_id = ?1
+     ORDER BY id ASC`
+  )
+    .bind(groupId)
+    .all();
+
+  if (!results || results.length === 0) {
+    await sendMessage(env, chatId, "نسخه‌ی دیگه‌ای از این آهنگ پیدا نشد 🙁");
+    return;
+  }
+
+  await sendMessage(
+    env,
+    chatId,
+    `🎧 ${results.length} نسخه از این آهنگ پیدا شد، دارم پشت سر هم برات می‌فرستم...`
+  );
+
+  // پشت سر هم و به ترتیب (نه موازی) می‌فرستیم تا توی چت به هم نریزن
+  for (const song of results) {
+    await deliverSong(env, chatId, song, userMessageId);
   }
 }
 
