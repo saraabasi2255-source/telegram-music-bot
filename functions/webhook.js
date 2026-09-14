@@ -40,13 +40,20 @@ async function handleChannelPost(msg, env) {
   if (!audio) return; // فقط فایل‌های صوتی (audio) رو ثبت می‌کنیم
 
   // 👇 فقط از چنل(های) آرشیو ذخیره کن، نه از چنل اصلی/پابلیک
-  // می‌تونی یک یا دو چنلِ آرشیو داشته باشی (ARCHIVE_CHAT_ID و ARCHIVE_CHAT_ID_2)
-  const archiveIds = [env.ARCHIVE_CHAT_ID, env.ARCHIVE_CHAT_ID_2]
+  // هم اسم ARCHIVE_CHAT_ID / ARCHIVE_CHAT_ID_2 رو قبول می‌کنه، هم
+  // ARCHIVE_CHANNEL1 / ARCHIVE_CHANNEL2 (هر کدوم توی تنظیمات Cloudflare
+  // ست کرده باشی کار می‌کنه)
+  const archiveIds = [
+    env.ARCHIVE_CHAT_ID,
+    env.ARCHIVE_CHAT_ID_2,
+    env.ARCHIVE_CHANNEL1,
+    env.ARCHIVE_CHANNEL2,
+  ]
     .filter(Boolean)
     .map(String);
 
   if (archiveIds.length === 0) {
-    console.warn("ARCHIVE_CHAT_ID تنظیم نشده - هیچ آهنگی ذخیره نمی‌شه");
+    console.warn("هیچ چنل آرشیوی تنظیم نشده - هیچ آهنگی ذخیره نمی‌شه");
     return;
   }
   if (!archiveIds.includes(String(msg.chat.id))) {
