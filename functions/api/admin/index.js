@@ -10,12 +10,6 @@ export async function onRequestGet(context) {
     return new Response("forbidden", { status: 403 });
   }
 
-  // چنل‌های آرشیوِ تعریف‌شده (یک یا دو تا) — برای فیلتر «Archive» توی پنل
-  const archives = [
-    env.ARCHIVE_CHAT_ID ? { id: String(env.ARCHIVE_CHAT_ID), label: "Archive 1" } : null,
-    env.ARCHIVE_CHAT_ID_2 ? { id: String(env.ARCHIVE_CHAT_ID_2), label: "Archive 2" } : null,
-  ].filter(Boolean);
-
   const html = `<!DOCTYPE html>
 <html lang="en" dir="ltr">
 <head>
@@ -202,6 +196,22 @@ export async function onRequestGet(context) {
     font-family: var(--mono);
   }
 
+  .dup-badge {
+    display: inline-flex; align-items: center;
+    background: var(--danger-soft); border: 1px solid var(--danger);
+    color: var(--danger);
+    padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+    margin-inline-start: 6px; letter-spacing: .02em;
+  }
+
+  .checkbox-label {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 13px; color: var(--text-dim); cursor: pointer; user-select: none;
+    background: var(--surface); border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: var(--radius-sm);
+  }
+  .checkbox-label input { accent-color: var(--danger); width: 14px; height: 14px; cursor: pointer; }
+
   .chevron-cell { width: 34px; text-align: right; }
   .chevron-btn {
     background: transparent; border: 0; color: var(--text-faint); cursor: pointer;
@@ -331,7 +341,13 @@ export async function onRequestGet(context) {
     </div>
 
     <div class="controls">
-      ${archives.length > 1 ? '<select id="archiveFilter">\n        <option value="">All archives</option>\n        ' + archives.map(a => '<option value="' + a.id + '">' + a.label + '</option>').join("\n        ") + '\n      </select>' : ''}
+      <label class="checkbox-label">
+        <input type="checkbox" id="duplicatesOnly" />
+        Duplicates only
+      </label>
+      <select id="channelFilter">
+        <option value="">All channels</option>
+      </select>
       <select id="performerFilter">
         <option value="">All artists</option>
       </select>
@@ -418,13 +434,13 @@ export async function onRequestGet(context) {
 <!-- ================= client JS ================= -->
 <script>
   const KEY = new URLSearchParams(location.search).get("key") || "";
-  const ARCHIVES = ${JSON.stringify(archives)};
   const qInput = document.getElementById("q");
   const rowsEl = document.getElementById("rows");
   const statsEl = document.getElementById("stats");
   const toastEl = document.getElementById("toast");
   const performerFilter = document.getElementById("performerFilter");
-  const archiveFilter = document.getElementById("archiveFilter"); // ممکنه null باشه (فقط یه آرشیو)
+  const channelFilter = document.getElementById("channelFilter");
+  const duplicatesOnly = document.getElementById("duplicatesOnly");
   const sortSelect = document.getElementById("sortSelect");
   const pagerEl = document.getElementById("pager");
   const pagerInfo = document.getElementById("pagerInfo");
@@ -439,6 +455,8 @@ export async function onRequestGet(context) {
   const selectDeleteBtn = document.getElementById("selectDeleteBtn");
 
   let allSongs = [];
+  let channelLabels = {};
+  let duplicateTitles = new Set();
   let currentPage = 1;
   let PAGE_SIZE = 15;
   let pendingDeleteId = null;
@@ -485,13 +503,49 @@ export async function onRequestGet(context) {
     return "https://t.me/c/" + shortId + "/" + messageId;
   }
 
+  // یه performer مثل "Qmiir & DJ samer" رو به تک‌تک اسم‌ها می‌شکنه
+  // پشتیبانی از جداکننده‌های رایج: & , ، / + x vs feat ft featuring و
+  function splitPerformers(performer) {
+    if (!performer) return [];
+    return performer
+      .split(/\s*&\s*|\s*,\s*|\s*،\s*|\s*\/\s*|\s*\+\s*|\s+x\s+|\s+X\s+|\s+vs\.?\s+|\s+feat\.?\s+|\s+ft\.?\s+|\s+featuring\s+|\s+و\s+/)
+      .map(s => s.trim())
+      .filter(Boolean);
+  }
+
+  function computeDuplicateTitles() {
+    const counts = {};
+    for (const s of allSongs) {
+      const norm = (s.title || "").trim().toLowerCase();
+      if (!norm) continue;
+      counts[norm] = (counts[norm] || 0) + 1;
+    }
+    duplicateTitles = new Set(Object.keys(counts).filter(k => counts[k] > 1));
+  }
+
+  async function loadChannelLabels() {
+    try {
+      const res = await fetch("/api/channels");
+      const data = await res.json();
+      channelLabels = {};
+      for (const ch of (data.channels || [])) {
+        channelLabels[String(ch.chat_id)] = ch.label;
+      }
+    } catch (e) {
+      channelLabels = {}; // اگه نیومد، فقط آیدی خام رو نشون می‌دیم
+    }
+  }
+
   async function load() {
     try {
+      await loadChannelLabels();
       const res = await fetch("/api/admin/list?key=" + encodeURIComponent(KEY));
       if (!res.ok) throw new Error("Failed to load list (" + res.status + ")");
       const data = await res.json();
       allSongs = data.songs || [];
+      computeDuplicateTitles();
       populatePerformerFilter();
+      populateChannelFilter();
       render();
     } catch (e) {
       rowsEl.innerHTML = '<tr><td colspan="5"><div class="empty">' + esc(e.message) + '</div></td></tr>';
@@ -500,9 +554,19 @@ export async function onRequestGet(context) {
     }
   }
 
+  function populateChannelFilter() {
+    const current = channelFilter.value;
+    const ids = [...new Set(allSongs.map(s => s.chat_id).filter(Boolean).map(String))].sort();
+    channelFilter.innerHTML = '<option value="">All channels</option>' +
+      ids.map(id => '<option value="' + esc(id) + '">' + esc(channelLabels[id] || id) + '</option>').join("");
+    channelFilter.value = ids.includes(current) ? current : "";
+  }
+
   function populatePerformerFilter() {
     const current = performerFilter.value;
-    const names = [...new Set(allSongs.map(s => s.performer).filter(Boolean))].sort();
+    const namesSet = new Set();
+    allSongs.forEach(s => splitPerformers(s.performer).forEach(n => namesSet.add(n)));
+    const names = [...namesSet].sort((a, b) => a.localeCompare(b));
     performerFilter.innerHTML = '<option value="">All artists</option>' +
       names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join("");
     performerFilter.value = names.includes(current) ? current : "";
@@ -520,16 +584,18 @@ export async function onRequestGet(context) {
   function getFiltered() {
     const q = qInput.value.trim().toLowerCase();
     const performer = performerFilter.value;
-    const archiveId = archiveFilter ? archiveFilter.value : "";
+    const channel = channelFilter.value;
+    const onlyDup = duplicatesOnly.checked;
     let list = allSongs.filter(s =>
-      (!performer || s.performer === performer) &&
-      (!archiveId || String(s.chat_id) === archiveId) &&
+      (!performer || splitPerformers(s.performer).includes(performer)) &&
+      (!channel || String(s.chat_id) === channel) &&
+      (!onlyDup || duplicateTitles.has((s.title || "").trim().toLowerCase())) &&
       (!q ||
         (s.title || "").toLowerCase().includes(q) ||
         (s.performer || "").toLowerCase().includes(q) ||
         (s.file_name || "").toLowerCase().includes(q))
     );
-    const { key, dir } = getSortState();
+    const { key, dir } = onlyDup ? { key: "title", dir: 1 } : getSortState();
     list = [...list].sort((a, b) => {
       let va = a[key], vb = b[key];
       if (typeof va === "string") { va = va.toLowerCase(); vb = (vb || "").toLowerCase(); }
@@ -543,6 +609,9 @@ export async function onRequestGet(context) {
   function updateStats(filteredCount) {
     const totalDur = allSongs.reduce((sum, s) => sum + (s.duration || 0), 0);
     let html = "<span><b>" + allSongs.length + "</b> songs total</span><span class='dot'>&middot;</span><span>Total duration: <b>" + fmtTotalDuration(totalDur) + "</b></span>";
+    if (duplicateTitles.size > 0) {
+      html += "<span class='dot'>&middot;</span><span style='color:var(--danger)'><b>" + duplicateTitles.size + "</b> duplicate title" + (duplicateTitles.size > 1 ? "s" : "") + "</span>";
+    }
     if (filteredCount !== allSongs.length) {
       html += "<span class='dot'>&middot;</span><span><b>" + filteredCount + "</b> results found</span>";
     }
@@ -601,20 +670,22 @@ export async function onRequestGet(context) {
         ? '<span class="row-checkbox' + (isSelected ? ' checked' : '') + '"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
         : "";
 
+      const isDup = duplicateTitles.has((s.title || "").trim().toLowerCase());
+      const dupBadge = isDup ? '<span class="dup-badge">DUPLICATE</span>' : "";
+
       const mainRow = '<tr class="song-row' + (isOpen ? ' open' : '') + (isSelected ? ' selected' : '') + '" data-id="' + s.id + '">' +
-        '<td class="cell-main"><span class="title-line">' + checkboxHtml + '<span class="title-cell">' + esc(s.title) + '</span></span><span class="artist-cell">' + esc(s.performer) + '</span></td>' +
+        '<td class="cell-main"><span class="title-line">' + checkboxHtml + '<span class="title-cell">' + esc(s.title) + '</span>' + dupBadge + '</span><span class="artist-cell">' + esc(s.performer) + '</span></td>' +
         '<td class="cell-artist">' + esc(s.performer) + '</td>' +
         '<td class="cell-meta"><span class="dur-pill">' + fmtDuration(s.duration) + '</span></td>' +
         '<td class="muted cell-meta">' + esc(s.created_at) + '</td>' +
         '<td class="chevron-cell"><button class="chevron-btn" aria-label="Toggle details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button></td>' +
       '</tr>';
 
-      const archiveLabel = (ARCHIVES.find(a => a.id === String(s.chat_id)) || {}).label;
       const detailRow = '<tr class="detail-row' + (isOpen ? '' : ' hidden') + '" data-detail-for="' + s.id + '">' +
         '<td colspan="5">' +
           '<div class="detail-grid">' +
             '<div><span class="detail-label">File name</span><span class="detail-value">' + esc(s.file_name) + '</span></div>' +
-            '<div><span class="detail-label">Chat ID</span><span class="detail-value">' + esc(s.chat_id) + (archiveLabel ? ' (' + esc(archiveLabel) + ')' : '') + '</span></div>' +
+            '<div><span class="detail-label">Chat ID</span><span class="detail-value">' + esc(s.chat_id) + '</span></div>' +
             '<div><span class="detail-label">Message ID</span><span class="detail-value">' + esc(s.message_id) + '</span></div>' +
           '</div>' +
           '<div class="detail-actions">' + openBtn + copyBtn +
@@ -822,7 +893,8 @@ export async function onRequestGet(context) {
 
   qInput.addEventListener("input", () => { currentPage = 1; render(); });
   performerFilter.addEventListener("change", () => { currentPage = 1; render(); });
-  if (archiveFilter) archiveFilter.addEventListener("change", () => { currentPage = 1; render(); });
+  channelFilter.addEventListener("change", () => { currentPage = 1; render(); });
+  duplicatesOnly.addEventListener("change", () => { currentPage = 1; render(); });
   sortSelect.addEventListener("change", () => { currentPage = 1; render(); });
   pageSizeSelect.addEventListener("change", () => {
     PAGE_SIZE = parseInt(pageSizeSelect.value, 10) || 15;
