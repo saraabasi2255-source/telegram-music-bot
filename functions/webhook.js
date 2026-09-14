@@ -101,10 +101,37 @@ async function handleMessage(msg, env) {
   }
 
   if (text.startsWith("/start")) {
+    const payload = text.slice("/start".length).trim();
+
+    // اومده از دکمه‌ی «جستجوی این آهنگ» که بات دستیارِ پست‌گذاری می‌سازه
+    // ⇒ فرمت: /start q_<linkId> — توی جدول search_links اسم آهنگ/خواننده
+    // ذخیره شده و اینجا فقط شماره‌ش توی لینکه (چون لینک‌های تلگرام حروف
+    // فارسی قبول نمی‌کنن)
+    if (payload.startsWith("q_")) {
+      const linkId = Number(payload.slice("q_".length));
+      if (Number.isInteger(linkId) && linkId > 0) {
+        const link = await env.DB.prepare(`SELECT query, performer FROM search_links WHERE id = ?1`)
+          .bind(linkId)
+          .first();
+        if (link && (link.query || link.performer)) {
+          const results = await searchSongs(env, link.query || link.performer, 100);
+          const label = link.query || link.performer;
+
+          if (results.length === 0) {
+            await sendNoResultsMessage(env, chatId, null, label);
+          } else if (results.length === 1) {
+            await deliverSong(env, chatId, results[0], null);
+          } else {
+            await sendResultsPage(env, chatId, results, 0, label, null);
+          }
+          return;
+        }
+      }
+    }
+
     // لینک شیشه‌ای «نسخه‌های دیگه‌ی این آهنگ» به شکل زیر بات رو باز می‌کنه:
     // https://t.me/<bot_username>?start=ver_<groupId>
     // که تلگرام خودش به‌صورت پیام «/start ver_<groupId>» برامون می‌فرسته
-    const payload = text.slice("/start".length).trim();
     if (payload.startsWith("ver_")) {
       const groupId = Number(payload.slice("ver_".length));
       if (Number.isInteger(groupId) && groupId > 0) {
@@ -291,28 +318,127 @@ async function handleCallbackQuery(cq, env) {
 // تعداد آیتم در هر صفحه
 const PAGE_SIZE = 7;
 
-// جستجو در دیتابیس (تا سقف limit)
+// ── نرمال‌سازی متن فارسی/عربی ──────────────────────────────────
+// خیلی از «پیدا نشدن»ها به‌خاطر اینه که کاربر یا فایل از یه شکلِ دیگه‌ی
+// همون حرف استفاده کرده (ی عربی به‌جای ی فارسی، ك عربی به‌جای ک فارسی،
+// اعراب، نیم‌فاصله، اعداد عربی/فارسی و ...) که از نظر ظاهری فرقی ندارن
+// ولی از نظر کدِ کامپیوتری کاملا متفاوتن. این تابع همه‌شونو یکی می‌کنه.
+function normalizeText(s) {
+  if (!s) return "";
+  return s
+    .toString()
+    .replace(/[\u064B-\u065F\u0610-\u061A\u06D6-\u06ED\u0670]/g, "") // اعراب/تشکیل
+    .replace(/[إأآا]/g, "ا")
+    .replace(/ي/g, "ی")
+    .replace(/ك/g, "ک")
+    .replace(/ة/g, "ه")
+    .replace(/ؤ/g, "و")
+    .replace(/ئ/g, "ی")
+    .replace(/[\u200c\u200e\u200f]/g, " ") // نیم‌فاصله و کاراکترهای جهت‌دار
+    .replace(/[۰۱۲۳۴۵۶۷۸۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+    .replace(/[٠١٢٣٤٥٦٧٨٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, " ") // علائم نگارشی حذف بشه، فقط حرف/عدد/فاصله بمونه
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenize(s) {
+  return normalizeText(s).split(" ").filter(Boolean);
+}
+
+// فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم/جابه‌جا بشه تا یکی
+// بشن) — جابه‌جاییِ دو حرفِ کناری (مثلا believer ↔ beleiver، خیلی رایجه)
+// رو هم یه اشتباهِ تایپیِ واحد حساب می‌کنه، نه دوتا
+function levenshtein(a, b) {
+  const m = a.length,
+    n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 0; i <= m; i++) dp[i][0] = i;
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        dp[i][j] = Math.min(dp[i][j], dp[i - 2][j - 2] + 1); // جابه‌جاییِ دو حرفِ کناری
+      }
+    }
+  }
+  return dp[m][n];
+}
+
+// دو کلمه رو «تقریبا یکی» حساب می‌کنه اگه فرقشون فقط یکی-دو حرفِ جزئی
+// باشه (اشتباه تایپی)، نه یه کلمه‌ی کاملا متفاوت
+function wordsAreClose(a, b) {
+  if (!a || !b) return false;
+  const maxLen = Math.max(a.length, b.length);
+  if (maxLen < 3) return false;
+  const dist = levenshtein(a, b);
+  const allowed = maxLen <= 5 ? 1 : maxLen <= 9 ? 2 : 3;
+  return dist <= allowed;
+}
+
+// چقدر یه کلمه‌ی موجود توی آهنگ (rt) با یه کلمه‌ی جستجوشده (qt) نزدیکه؟
+function tokenMatchScore(rt, qt) {
+  if (rt === qt) return 1;
+  if (rt.includes(qt) || qt.includes(rt)) {
+    const longer = Math.max(rt.length, qt.length);
+    const shorter = Math.min(rt.length, qt.length);
+    return 0.85 * (shorter / longer);
+  }
+  if (!wordsAreClose(rt, qt)) return 0;
+  const maxLen = Math.max(rt.length, qt.length);
+  const dist = levenshtein(rt, qt);
+  return 0.6 * (1 - dist / maxLen);
+}
+
+// جستجو در دیتابیس (تا سقف limit) — کلمه‌کلمه، بدون توجه به ترتیب، با
+// تحمل نسبت به تفاوت حروف عربی/فارسی و اشتباه تایپیِ جزئی
 async function searchSongs(env, q, limit = 100) {
-  const like = `%${q}%`;
-  const startsWith = `${q}%`;
+  const queryTokens = tokenize(q);
+  if (queryTokens.length === 0) return [];
+  const normQuery = normalizeText(q);
 
-  const stmt = env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, caption, group_id
-     FROM songs
-     WHERE title LIKE ?1 OR performer LIKE ?1 OR file_name LIKE ?1 OR caption LIKE ?1
-     ORDER BY
-       CASE
-         WHEN title LIKE ?2 THEN 0
-         WHEN performer LIKE ?2 THEN 1
-         WHEN file_name LIKE ?2 THEN 2
-         ELSE 3
-       END,
-       length(COALESCE(title, file_name, '')) ASC
-     LIMIT ?3`
-  ).bind(like, startsWith, limit);
+  const { results } = await env.DB.prepare(
+    `SELECT id, chat_id, message_id, title, performer, caption, file_name, group_id FROM songs`
+  ).all();
 
-  const { results } = await stmt.all();
-  return results;
+  const scored = [];
+  for (const row of results) {
+    const combinedNorm = normalizeText(
+      [row.title, row.performer, row.file_name, row.caption].filter(Boolean).join(" ")
+    );
+    const rowTokens = combinedNorm.split(" ").filter(Boolean);
+    if (rowTokens.length === 0) continue;
+
+    let totalScore = 0;
+    let allMatched = true;
+    for (const qt of queryTokens) {
+      let best = 0;
+      for (const rt of rowTokens) {
+        const s = tokenMatchScore(rt, qt);
+        if (s > best) best = s;
+      }
+      if (best <= 0) {
+        allMatched = false;
+        break;
+      }
+      totalScore += best;
+    }
+    if (!allMatched) continue;
+
+    if (combinedNorm.includes(normQuery)) totalScore += 5;
+
+    const avgScore = totalScore / queryTokens.length;
+    scored.push({ row, avgScore, len: (row.title || row.file_name || "").length });
+  }
+
+  scored.sort((a, b) => b.avgScore - a.avgScore || a.len - b.len);
+
+  return scored.slice(0, limit).map((s) => s.row);
 }
 
 // پیام «نتیجه‌ای پیدا نشد» با ظاهر مورد نظر (شبیه اسکرین‌شات):
