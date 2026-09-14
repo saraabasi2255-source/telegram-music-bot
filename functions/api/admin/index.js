@@ -58,7 +58,6 @@ export async function onRequestGet(context) {
 
   .wrap { max-width: 1180px; margin: 0 auto; }
 
-  /* ---------- header ---------- */
   .topbar {
     position: sticky; top: 12px; z-index: 20;
     display: flex; justify-content: space-between; align-items: center;
@@ -119,7 +118,6 @@ export async function onRequestGet(context) {
   .icon-btn.spin svg { animation: spin .6s linear; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* ---------- buttons ---------- */
   .btn {
     border: 0; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer;
     font-family: inherit; font-size: 12.5px; font-weight: 600;
@@ -129,7 +127,7 @@ export async function onRequestGet(context) {
   .btn svg { width: 13px; height: 13px; }
   .btn-danger { background: var(--danger-soft); color: var(--danger); border: 1px solid #f2536a3d; }
   .btn-danger:hover { background: var(--danger); color: #fff; }
-  .btn-open { background: var(--teal-soft); color: var(--teal); border: 1px solid #2dd4bf3d; }
+  .btn-open { background: var(--teal-soft); color: var(--teal); border: 1px solid #2dd4bf3d; text-decoration: none; }
   .btn-open:hover { background: var(--teal); color: #06201c; }
   .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
@@ -229,7 +227,6 @@ export async function onRequestGet(context) {
   .detail-value { font-family: var(--mono); font-size: 12.5px; color: var(--text-dim); word-break: break-all; }
   .detail-actions { display: flex; gap: 6px; flex-wrap: wrap; padding: 14px 4px 4px; }
 
-  /* ---------- pagination ---------- */
   .pager {
     display: flex; align-items: center; justify-content: space-between;
     padding: 12px 16px; border-top: 1px solid var(--border-soft);
@@ -239,7 +236,6 @@ export async function onRequestGet(context) {
   .pager .btn-ghost { padding: 6px 12px; font-size: 12.5px; }
   .pager .btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
 
-  /* ---------- toast ---------- */
   .toast {
     position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(10px);
     background: #16a34a; color: #fff; padding: 11px 20px; border-radius: 10px;
@@ -249,7 +245,6 @@ export async function onRequestGet(context) {
   .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
   .toast.error { background: var(--danger); }
 
-  /* ---------- confirm modal ---------- */
   .modal-backdrop {
     position: fixed; inset: 0; background: #05070ecc; backdrop-filter: blur(3px);
     display: flex; align-items: center; justify-content: center; z-index: 60;
@@ -272,7 +267,13 @@ export async function onRequestGet(context) {
   .modal-btns { display: flex; gap: 8px; }
   .modal-btns .btn, .modal-btns .btn-ghost { flex: 1; justify-content: center; padding: 9px; }
 
-  /* ---------- responsive ---------- */
+  .error-banner {
+    background: #7f1d1d; color: #fff; padding: 12px 16px; border-radius: 10px;
+    margin-bottom: 16px; font-family: var(--mono); font-size: 12.5px;
+    white-space: pre-wrap; word-break: break-all; display: none;
+  }
+  .error-banner.show { display: block; }
+
   @media (max-width: 760px) {
     body { padding: 14px 12px 50px; }
     .topbar { position: static; padding: 14px; }
@@ -305,19 +306,10 @@ export async function onRequestGet(context) {
     .detail-actions { flex-direction: column; align-items: stretch; }
     .detail-actions .btn, .detail-actions .btn-copy { justify-content: center; width: 100%; }
 
-    .pager {
-      flex-direction: column; align-items: stretch; text-align: center; gap: 12px;
-      padding: 14px;
-    }
-    .pager-btns {
-      flex-wrap: wrap; justify-content: center; gap: 8px;
-    }
-    .pager-btns label {
-      width: 100%; justify-content: center;
-    }
-    .pager-btns #prevPage, .pager-btns #nextPage {
-      flex: 1 1 0; min-width: 90px;
-    }
+    .pager { flex-direction: column; align-items: stretch; text-align: center; gap: 12px; padding: 14px; }
+    .pager-btns { flex-wrap: wrap; justify-content: center; gap: 8px; }
+    .pager-btns label { width: 100%; justify-content: center; }
+    .pager-btns #prevPage, .pager-btns #nextPage { flex: 1 1 0; min-width: 90px; }
     .pager-btns #pageIndicator { width: 100%; order: 3; }
 
     .selection-bar { flex-direction: column; align-items: stretch; gap: 10px; }
@@ -328,6 +320,8 @@ export async function onRequestGet(context) {
 </head>
 <body>
 <div class="wrap">
+
+  <div class="error-banner" id="errorBanner"></div>
 
   <div class="topbar">
     <div class="brand">
@@ -431,40 +425,62 @@ export async function onRequestGet(context) {
   </div>
 </div>
 
-<!-- ================= client JS ================= -->
 <script>
-  const KEY = new URLSearchParams(location.search).get("key") || "";
-  const qInput = document.getElementById("q");
-  const rowsEl = document.getElementById("rows");
-  const statsEl = document.getElementById("stats");
-  const toastEl = document.getElementById("toast");
-  const performerFilter = document.getElementById("performerFilter");
-  const channelFilter = document.getElementById("channelFilter");
-  const duplicatesOnly = document.getElementById("duplicatesOnly");
-  const sortSelect = document.getElementById("sortSelect");
-  const pagerEl = document.getElementById("pager");
-  const pagerInfo = document.getElementById("pagerInfo");
-  const pageIndicator = document.getElementById("pageIndicator");
-  const refreshBtn = document.getElementById("refreshBtn");
-  const pageSizeSelect = document.getElementById("pageSizeSelect");
-  const selectModeBtn = document.getElementById("selectModeBtn");
-  const selectionBar = document.getElementById("selectionBar");
-  const selectionCount = document.getElementById("selectionCount");
-  const selectAllBtn = document.getElementById("selectAllBtn");
-  const selectCancelBtn = document.getElementById("selectCancelBtn");
-  const selectDeleteBtn = document.getElementById("selectDeleteBtn");
+  // ---------- global error handlers (روی صفحه نشون بده) ----------
+  function showError(msg) {
+    var b = document.getElementById("errorBanner");
+    if (!b) return;
+    b.textContent = "ERROR: " + msg;
+    b.classList.add("show");
+  }
+  window.addEventListener("error", function (e) {
+    showError(e.message + " @ " + (e.filename || "") + ":" + (e.lineno || ""));
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    showError((e.reason && e.reason.message) || String(e.reason));
+  });
 
-  let allSongs = [];
-  let channelLabels = {};
-  let duplicateTitles = new Set();
-  let currentPage = 1;
-  let PAGE_SIZE = 15;
-  let pendingDeleteId = null;
-  let pendingBulkDelete = false;
-  let openDetailId = null;
-  let selectionMode = false;
-  let selectedIds = new Set();
-  let currentPageIds = [];
+  var KEY = new URLSearchParams(location.search).get("key") || "";
+  var qInput = document.getElementById("q");
+  var rowsEl = document.getElementById("rows");
+  var statsEl = document.getElementById("stats");
+  var toastEl = document.getElementById("toast");
+  var performerFilter = document.getElementById("performerFilter");
+  var channelFilter = document.getElementById("channelFilter");
+  var duplicatesOnly = document.getElementById("duplicatesOnly");
+  var sortSelect = document.getElementById("sortSelect");
+  var pagerEl = document.getElementById("pager");
+  var pagerInfo = document.getElementById("pagerInfo");
+  var pageIndicator = document.getElementById("pageIndicator");
+  var refreshBtn = document.getElementById("refreshBtn");
+  var pageSizeSelect = document.getElementById("pageSizeSelect");
+  var selectModeBtn = document.getElementById("selectModeBtn");
+  var selectionBar = document.getElementById("selectionBar");
+  var selectionCount = document.getElementById("selectionCount");
+  var selectAllBtn = document.getElementById("selectAllBtn");
+  var selectCancelBtn = document.getElementById("selectCancelBtn");
+  var selectDeleteBtn = document.getElementById("selectDeleteBtn");
+
+  var allSongs = [];
+  var channelLabels = {};
+  var duplicateTitles = new Set();
+  var currentPage = 1;
+  var PAGE_SIZE = 15;
+  var pendingDeleteId = null;
+  var pendingBulkDelete = false;
+  var openDetailId = null;
+  var selectionMode = false;
+  var selectedIds = new Set();
+  var currentPageIds = [];
+
+  function fetchWithTimeout(url, opts, ms) {
+    opts = opts || {};
+    ms = ms || 12000;
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, ms);
+    var merged = Object.assign({}, opts, { signal: ctrl.signal });
+    return fetch(url, merged).finally(function () { clearTimeout(t); });
+  }
 
   function toast(msg, isError) {
     toastEl.innerHTML = (isError
@@ -473,103 +489,113 @@ export async function onRequestGet(context) {
     ) + '<span>' + esc(msg) + '</span>';
     toastEl.className = "toast show" + (isError ? " error" : "");
     clearTimeout(toast._t);
-    toast._t = setTimeout(() => { toastEl.className = "toast"; }, 2500);
+    toast._t = setTimeout(function () { toastEl.className = "toast"; }, 2500);
   }
 
   function fmtDuration(s) {
     if (!s) return "-";
-    const m = Math.floor(s / 60);
-    const sec = String(s % 60).padStart(2, "0");
+    var m = Math.floor(s / 60);
+    var sec = String(s % 60).padStart(2, "0");
     return m + ":" + sec;
   }
 
   function fmtTotalDuration(totalSeconds) {
-    const h = Math.floor(totalSeconds / 3600);
-    const m = Math.floor((totalSeconds % 3600) / 60);
+    var h = Math.floor(totalSeconds / 3600);
+    var m = Math.floor((totalSeconds % 3600) / 60);
     if (h > 0) return h + "h " + m + "m";
     return m + "m";
   }
 
   function esc(s) {
-    return String(s ?? "").replace(/[&<>"']/g, c => ({
-      "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
-    })[c]);
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
   }
 
   function buildTelegramLink(chatId, messageId) {
     if (!chatId || !messageId) return null;
-    const s = String(chatId);
-    const shortId = s.startsWith("-100") ? s.slice(4) : s.replace("-", "");
+    var s = String(chatId);
+    var shortId = s.indexOf("-100") === 0 ? s.slice(4) : s.replace("-", "");
     return "https://t.me/c/" + shortId + "/" + messageId;
   }
 
-  // یه performer مثل "Qmiir & DJ samer" رو به تک‌تک اسم‌ها می‌شکنه
-  // پشتیبانی از جداکننده‌های رایج: & , ، / + x vs feat ft featuring و
   function splitPerformers(performer) {
     if (!performer) return [];
     return performer
-      .split(/\s*&\s*|\s*,\s*|\s*،\s*|\s*\/\s*|\s*\+\s*|\s+x\s+|\s+X\s+|\s+vs\.?\s+|\s+feat\.?\s+|\s+ft\.?\s+|\s+featuring\s+|\s+و\s+/)
-      .map(s => s.trim())
+      .split(/\\s*&\\s*|\\s*,\\s*|\\s*،\\s*|\\s*\\/\\s*|\\s*\\+\\s*|\\s+vs\\.?\\s+|\\s+feat\\.?\\s+|\\s+ft\\.?\\s+|\\s+featuring\\s+|\\s+و\\s+/)
+      .map(function (s) { return s.trim(); })
       .filter(Boolean);
   }
 
   function computeDuplicateTitles() {
-    const counts = {};
-    for (const s of allSongs) {
-      const norm = (s.title || "").trim().toLowerCase();
+    var counts = {};
+    for (var i = 0; i < allSongs.length; i++) {
+      var s = allSongs[i];
+      var norm = (s.title || "").trim().toLowerCase();
       if (!norm) continue;
       counts[norm] = (counts[norm] || 0) + 1;
     }
-    duplicateTitles = new Set(Object.keys(counts).filter(k => counts[k] > 1));
+    duplicateTitles = new Set(Object.keys(counts).filter(function (k) { return counts[k] > 1; }));
   }
 
   async function loadChannelLabels() {
     try {
-      const res = await fetch("/api/channels");
-      const data = await res.json();
+      var res = await fetchWithTimeout("/api/channels", {}, 5000);
+      if (!res.ok) throw new Error("channels " + res.status);
+      var data = await res.json();
       channelLabels = {};
-      for (const ch of (data.channels || [])) {
-        channelLabels[String(ch.chat_id)] = ch.label;
+      var chs = data.channels || [];
+      for (var i = 0; i < chs.length; i++) {
+        channelLabels[String(chs[i].chat_id)] = chs[i].label;
       }
     } catch (e) {
-      channelLabels = {}; // اگه نیومد، فقط آیدی خام رو نشون می‌دیم
+      console.warn("channels failed:", e);
+      channelLabels = {};
     }
   }
 
   async function load() {
     try {
+      statsEl.textContent = "Loading...";
       await loadChannelLabels();
-      const res = await fetch("/api/admin/list?key=" + encodeURIComponent(KEY));
+
+      var res = await fetchWithTimeout("/api/admin/list?key=" + encodeURIComponent(KEY), {}, 12000);
       if (!res.ok) throw new Error("Failed to load list (" + res.status + ")");
-      const data = await res.json();
+      var data = await res.json();
       allSongs = data.songs || [];
       computeDuplicateTitles();
       populatePerformerFilter();
       populateChannelFilter();
       render();
     } catch (e) {
-      rowsEl.innerHTML = '<tr><td colspan="5"><div class="empty">' + esc(e.message) + '</div></td></tr>';
+      console.error("LOAD ERROR:", e);
+      showError(e.message || String(e));
+      rowsEl.innerHTML = '<tr><td colspan="5"><div class="empty">' + esc(e.message || "Load failed") + '</div></td></tr>';
       pagerEl.style.display = "none";
       statsEl.textContent = "";
     }
   }
 
   function populateChannelFilter() {
-    const current = channelFilter.value;
-    const ids = [...new Set(allSongs.map(s => s.chat_id).filter(Boolean).map(String))].sort();
+    var current = channelFilter.value;
+    var idsSet = {};
+    allSongs.forEach(function (s) { if (s.chat_id) idsSet[String(s.chat_id)] = true; });
+    var ids = Object.keys(idsSet).sort();
     channelFilter.innerHTML = '<option value="">All channels</option>' +
-      ids.map(id => '<option value="' + esc(id) + '">' + esc(channelLabels[id] || id) + '</option>').join("");
-    channelFilter.value = ids.includes(current) ? current : "";
+      ids.map(function (id) { return '<option value="' + esc(id) + '">' + esc(channelLabels[id] || id) + '</option>'; }).join("");
+    channelFilter.value = ids.indexOf(current) !== -1 ? current : "";
   }
 
   function populatePerformerFilter() {
-    const current = performerFilter.value;
-    const namesSet = new Set();
-    allSongs.forEach(s => splitPerformers(s.performer).forEach(n => namesSet.add(n)));
-    const names = [...namesSet].sort((a, b) => a.localeCompare(b));
+    var current = performerFilter.value;
+    var namesSet = new Set();
+    allSongs.forEach(function (s) {
+      splitPerformers(s.performer).forEach(function (n) { namesSet.add(n); });
+    });
+    var names = Array.from(namesSet).sort(function (a, b) { return a.localeCompare(b); });
     performerFilter.innerHTML = '<option value="">All artists</option>' +
-      names.map(n => '<option value="' + esc(n) + '">' + esc(n) + '</option>').join("");
-    performerFilter.value = names.includes(current) ? current : "";
+      names.map(function (n) { return '<option value="' + esc(n) + '">' + esc(n) + '</option>'; }).join("");
+    performerFilter.value = names.indexOf(current) !== -1 ? current : "";
   }
 
   function getSortState() {
@@ -582,33 +608,39 @@ export async function onRequestGet(context) {
   }
 
   function getFiltered() {
-    const q = qInput.value.trim().toLowerCase();
-    const performer = performerFilter.value;
-    const channel = channelFilter.value;
-    const onlyDup = duplicatesOnly.checked;
-    let list = allSongs.filter(s =>
-      (!performer || splitPerformers(s.performer).includes(performer)) &&
-      (!channel || String(s.chat_id) === channel) &&
-      (!onlyDup || duplicateTitles.has((s.title || "").trim().toLowerCase())) &&
-      (!q ||
-        (s.title || "").toLowerCase().includes(q) ||
-        (s.performer || "").toLowerCase().includes(q) ||
-        (s.file_name || "").toLowerCase().includes(q))
-    );
-    const { key, dir } = onlyDup ? { key: "title", dir: 1 } : getSortState();
-    list = [...list].sort((a, b) => {
-      let va = a[key], vb = b[key];
+    var q = qInput.value.trim().toLowerCase();
+    var performer = performerFilter.value;
+    var channel = channelFilter.value;
+    var onlyDup = duplicatesOnly.checked;
+
+    var list = allSongs.filter(function (s) {
+      if (performer && splitPerformers(s.performer).indexOf(performer) === -1) return false;
+      if (channel && String(s.chat_id) !== channel) return false;
+      if (onlyDup && !duplicateTitles.has((s.title || "").trim().toLowerCase())) return false;
+      if (q) {
+        var t = (s.title || "").toLowerCase();
+        var p = (s.performer || "").toLowerCase();
+        var f = (s.file_name || "").toLowerCase();
+        if (t.indexOf(q) === -1 && p.indexOf(q) === -1 && f.indexOf(q) === -1) return false;
+      }
+      return true;
+    });
+
+    var sort = onlyDup ? { key: "title", dir: 1 } : getSortState();
+    list = list.slice().sort(function (a, b) {
+      var va = a[sort.key], vb = b[sort.key];
       if (typeof va === "string") { va = va.toLowerCase(); vb = (vb || "").toLowerCase(); }
-      if (va < vb) return -1 * dir;
-      if (va > vb) return 1 * dir;
+      if (va < vb) return -1 * sort.dir;
+      if (va > vb) return 1 * sort.dir;
       return 0;
     });
     return list;
   }
 
   function updateStats(filteredCount) {
-    const totalDur = allSongs.reduce((sum, s) => sum + (s.duration || 0), 0);
-    let html = "<span><b>" + allSongs.length + "</b> songs total</span><span class='dot'>&middot;</span><span>Total duration: <b>" + fmtTotalDuration(totalDur) + "</b></span>";
+    var totalDur = 0;
+    allSongs.forEach(function (s) { totalDur += (s.duration || 0); });
+    var html = "<span><b>" + allSongs.length + "</b> songs total</span><span class='dot'>&middot;</span><span>Total duration: <b>" + fmtTotalDuration(totalDur) + "</b></span>";
     if (duplicateTitles.size > 0) {
       html += "<span class='dot'>&middot;</span><span style='color:var(--danger)'><b>" + duplicateTitles.size + "</b> duplicate title" + (duplicateTitles.size > 1 ? "s" : "") + "</span>";
     }
@@ -619,12 +651,12 @@ export async function onRequestGet(context) {
   }
 
   function updateSortHeaders() {
-    const { key, dir } = getSortState();
-    document.querySelectorAll("th.sortable").forEach(th => {
-      const arrow = th.querySelector(".arrow");
-      if (th.dataset.key === key) {
+    var sort = getSortState();
+    document.querySelectorAll("th.sortable").forEach(function (th) {
+      var arrow = th.querySelector(".arrow");
+      if (th.dataset.key === sort.key) {
         th.classList.add("active");
-        arrow.textContent = dir === 1 ? "▲" : "▼";
+        arrow.textContent = sort.dir === 1 ? "▲" : "▼";
       } else {
         th.classList.remove("active");
         arrow.textContent = "▲";
@@ -633,7 +665,7 @@ export async function onRequestGet(context) {
   }
 
   function render() {
-    const filtered = getFiltered();
+    var filtered = getFiltered();
     updateStats(filtered.length);
     updateSortHeaders();
 
@@ -645,35 +677,35 @@ export async function onRequestGet(context) {
       return;
     }
 
-    const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+    var totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
     currentPage = Math.min(currentPage, totalPages);
-    const start = (currentPage - 1) * PAGE_SIZE;
-    const pageItems = filtered.slice(start, start + PAGE_SIZE);
-    currentPageIds = pageItems.map(s => s.id);
+    var start = (currentPage - 1) * PAGE_SIZE;
+    var pageItems = filtered.slice(start, start + PAGE_SIZE);
+    currentPageIds = pageItems.map(function (s) { return s.id; });
 
     rowsEl.classList.toggle("is-selecting", selectionMode);
 
-    rowsEl.innerHTML = pageItems.map(s => {
-      const isOpen = openDetailId === s.id;
-      const isSelected = selectedIds.has(s.id);
-      const tgLink = buildTelegramLink(s.chat_id, s.message_id);
+    var parts = [];
+    pageItems.forEach(function (s) {
+      var isOpen = openDetailId === s.id;
+      var isSelected = selectedIds.has(s.id);
+      var tgLink = buildTelegramLink(s.chat_id, s.message_id);
 
-      // دکمه‌ها با data-action (بدون onclick inline که میشکست)
-      const openBtn = tgLink
+      var openBtn = tgLink
         ? '<a class="btn btn-open" href="' + esc(tgLink) + '" target="_blank" rel="noopener" data-action="stop">Open in Telegram</a>'
         : "";
-      const copyBtn = tgLink
+      var copyBtn = tgLink
         ? '<button class="btn-copy" data-action="copy" data-link="' + esc(tgLink) + '" title="Copy link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> Copy link</button>'
         : "";
 
-      const checkboxHtml = selectionMode
+      var checkboxHtml = selectionMode
         ? '<span class="row-checkbox' + (isSelected ? ' checked' : '') + '"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
         : "";
 
-      const isDup = duplicateTitles.has((s.title || "").trim().toLowerCase());
-      const dupBadge = isDup ? '<span class="dup-badge">DUPLICATE</span>' : "";
+      var isDup = duplicateTitles.has((s.title || "").trim().toLowerCase());
+      var dupBadge = isDup ? '<span class="dup-badge">DUPLICATE</span>' : "";
 
-      const mainRow = '<tr class="song-row' + (isOpen ? ' open' : '') + (isSelected ? ' selected' : '') + '" data-id="' + s.id + '">' +
+      var mainRow = '<tr class="song-row' + (isOpen ? ' open' : '') + (isSelected ? ' selected' : '') + '" data-id="' + s.id + '">' +
         '<td class="cell-main"><span class="title-line">' + checkboxHtml + '<span class="title-cell">' + esc(s.title) + '</span>' + dupBadge + '</span><span class="artist-cell">' + esc(s.performer) + '</span></td>' +
         '<td class="cell-artist">' + esc(s.performer) + '</td>' +
         '<td class="cell-meta"><span class="dur-pill">' + fmtDuration(s.duration) + '</span></td>' +
@@ -681,7 +713,7 @@ export async function onRequestGet(context) {
         '<td class="chevron-cell"><button class="chevron-btn" aria-label="Toggle details"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg></button></td>' +
       '</tr>';
 
-      const detailRow = '<tr class="detail-row' + (isOpen ? '' : ' hidden') + '" data-detail-for="' + s.id + '">' +
+      var detailRow = '<tr class="detail-row' + (isOpen ? '' : ' hidden') + '" data-detail-for="' + s.id + '">' +
         '<td colspan="5">' +
           '<div class="detail-grid">' +
             '<div><span class="detail-label">File name</span><span class="detail-value">' + esc(s.file_name) + '</span></div>' +
@@ -694,11 +726,12 @@ export async function onRequestGet(context) {
         '</td>' +
       '</tr>';
 
-      return mainRow + detailRow;
-    }).join("");
+      parts.push(mainRow + detailRow);
+    });
+    rowsEl.innerHTML = parts.join("");
 
     pagerEl.style.display = "flex";
-    pagerInfo.textContent = "Showing " + (start + 1) + "\u2013" + Math.min(start + PAGE_SIZE, filtered.length) + " of " + filtered.length;
+    pagerInfo.textContent = "Showing " + (start + 1) + "\\u2013" + Math.min(start + PAGE_SIZE, filtered.length) + " of " + filtered.length;
     pageIndicator.textContent = "Page " + currentPage + " of " + totalPages;
     document.getElementById("prevPage").disabled = currentPage === 1;
     document.getElementById("nextPage").disabled = currentPage === totalPages;
@@ -721,7 +754,7 @@ export async function onRequestGet(context) {
     selectionBar.classList.toggle("show", selectionMode);
     selectionCount.textContent = selectedIds.size + " selected";
     selectDeleteBtn.disabled = selectedIds.size === 0;
-    const allOnPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
+    var allOnPageSelected = currentPageIds.length > 0 && currentPageIds.every(function (id) { return selectedIds.has(id); });
     selectAllBtn.textContent = allOnPageSelected ? "Clear all" : "Select all";
   }
 
@@ -729,17 +762,16 @@ export async function onRequestGet(context) {
     if (!link) return;
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(link).then(
-        () => toast("Link copied"),
-        () => toast("Could not copy link", true)
+        function () { toast("Link copied"); },
+        function () { toast("Could not copy link", true); }
       );
     } else {
-      // fallback برای مرورگرهای قدیمی
-      const ta = document.createElement("textarea");
+      var ta = document.createElement("textarea");
       ta.value = link;
       document.body.appendChild(ta);
       ta.select();
       try { document.execCommand("copy"); toast("Link copied"); }
-      catch { toast("Could not copy link", true); }
+      catch (e) { toast("Could not copy link", true); }
       document.body.removeChild(ta);
     }
   }
@@ -766,19 +798,19 @@ export async function onRequestGet(context) {
   }
 
   async function deleteOne(id) {
-    const res = await fetch("/api/admin/delete?key=" + encodeURIComponent(KEY), {
+    var res = await fetchWithTimeout("/api/admin/delete?key=" + encodeURIComponent(KEY), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id })
-    });
-    const data = await res.json();
+      body: JSON.stringify({ id: id })
+    }, 12000);
+    var data = await res.json();
     if (!res.ok || !data.ok) throw new Error(data.error || "Delete failed");
   }
 
   async function del(id) {
     try {
       await deleteOne(id);
-      allSongs = allSongs.filter(s => s.id !== id);
+      allSongs = allSongs.filter(function (s) { return s.id !== id; });
       if (openDetailId === id) openDetailId = null;
       populatePerformerFilter();
       render();
@@ -789,11 +821,15 @@ export async function onRequestGet(context) {
   }
 
   async function bulkDelete() {
-    const ids = [...selectedIds];
-    const results = await Promise.allSettled(ids.map(deleteOne));
-    const failed = results.filter(r => r.status === "rejected").length;
-    const okIds = ids.filter((id, i) => results[i].status === "fulfilled");
-    allSongs = allSongs.filter(s => !okIds.includes(s.id));
+    var ids = Array.from(selectedIds);
+    var results = await Promise.allSettled(ids.map(deleteOne));
+    var failed = 0;
+    var okIds = [];
+    for (var i = 0; i < results.length; i++) {
+      if (results[i].status === "fulfilled") okIds.push(ids[i]);
+      else failed++;
+    }
+    allSongs = allSongs.filter(function (s) { return okIds.indexOf(s.id) === -1; });
     selectedIds.clear();
     selectionMode = false;
     openDetailId = null;
@@ -804,13 +840,12 @@ export async function onRequestGet(context) {
     else toast(okIds.length + " song" + (okIds.length > 1 ? "s" : "") + " deleted");
   }
 
-  // ---------- event delegation: یک listener برای همه کلیک‌های جدول ----------
-  rowsEl.addEventListener("click", (e) => {
-    // دکمه‌ها/لینک‌هایی که data-action دارن
-    const actionEl = e.target.closest("[data-action]");
+  // ---------- event delegation ----------
+  rowsEl.addEventListener("click", function (e) {
+    var actionEl = e.target.closest("[data-action]");
     if (actionEl) {
-      const action = actionEl.dataset.action;
-      if (action === "stop") return; // لینک باز شود، ولی propagation نکنه
+      var action = actionEl.dataset.action;
+      if (action === "stop") return;
       e.preventDefault();
       e.stopPropagation();
       if (action === "copy") copyLink(actionEl.dataset.link);
@@ -818,91 +853,93 @@ export async function onRequestGet(context) {
       return;
     }
 
-    // کلیک روی ردیف آهنگ (نه روی دکمه‌ها)
-    const row = e.target.closest("tr.song-row");
-    if (row) {
-      const id = Number(row.dataset.id);
-      if (selectionMode) toggleSelect(id);
-      else toggleDetails(id);
-      return;
+    var chev = e.target.closest(".chevron-btn");
+    if (chev) {
+      var rowC = chev.closest("tr.song-row");
+      if (rowC) {
+        e.stopPropagation();
+        toggleDetails(Number(rowC.dataset.id));
+        return;
+      }
     }
 
-    // کلیک روی chevron
-    const chev = e.target.closest(".chevron-btn");
-    if (chev) {
-      const row2 = chev.closest("tr.song-row");
-      if (row2) toggleDetails(Number(row2.dataset.id));
+    var row = e.target.closest("tr.song-row");
+    if (row) {
+      var id = Number(row.dataset.id);
+      if (selectionMode) toggleSelect(id);
+      else toggleDetails(id);
     }
   });
 
-  document.getElementById("confirmOk").addEventListener("click", () => {
+  document.getElementById("confirmOk").addEventListener("click", function () {
     if (pendingBulkDelete) bulkDelete();
     else if (pendingDeleteId != null) del(pendingDeleteId);
     closeModal();
   });
   document.getElementById("confirmCancel").addEventListener("click", closeModal);
-  document.getElementById("confirmModal").addEventListener("click", (e) => {
+  document.getElementById("confirmModal").addEventListener("click", function (e) {
     if (e.target.id === "confirmModal") closeModal();
   });
 
-  selectModeBtn.addEventListener("click", () => {
+  selectModeBtn.addEventListener("click", function () {
     selectionMode = !selectionMode;
     if (!selectionMode) selectedIds.clear();
     openDetailId = null;
     updateSelectionUI();
     render();
   });
-  selectCancelBtn.addEventListener("click", () => {
+  selectCancelBtn.addEventListener("click", function () {
     selectionMode = false;
     selectedIds.clear();
     updateSelectionUI();
     render();
   });
-  selectAllBtn.addEventListener("click", () => {
-    const allOnPageSelected = currentPageIds.length > 0 && currentPageIds.every(id => selectedIds.has(id));
-    if (allOnPageSelected) currentPageIds.forEach(id => selectedIds.delete(id));
-    else currentPageIds.forEach(id => selectedIds.add(id));
+  selectAllBtn.addEventListener("click", function () {
+    var allOnPageSelected = currentPageIds.length > 0 && currentPageIds.every(function (id) { return selectedIds.has(id); });
+    if (allOnPageSelected) currentPageIds.forEach(function (id) { selectedIds.delete(id); });
+    else currentPageIds.forEach(function (id) { selectedIds.add(id); });
     updateSelectionUI();
     render();
   });
   selectDeleteBtn.addEventListener("click", askBulkDelete);
 
-  document.querySelectorAll("th.sortable").forEach(th => {
-    th.addEventListener("click", () => {
-      const key = th.dataset.key;
-      const map = { title: "title", performer: "artist", created_at: null, duration: null };
+  document.querySelectorAll("th.sortable").forEach(function (th) {
+    th.addEventListener("click", function () {
+      var key = th.dataset.key;
       if (key === "created_at") {
         sortSelect.value = sortSelect.value === "newest" ? "oldest" : "newest";
-      } else if (map[key]) {
-        sortSelect.value = map[key];
+      } else if (key === "title") {
+        sortSelect.value = "title";
+      } else if (key === "performer") {
+        sortSelect.value = "artist";
       }
       currentPage = 1;
       render();
     });
   });
 
-  document.getElementById("prevPage").addEventListener("click", () => { currentPage--; render(); });
-  document.getElementById("nextPage").addEventListener("click", () => { currentPage++; render(); });
+  document.getElementById("prevPage").addEventListener("click", function () { currentPage--; render(); });
+  document.getElementById("nextPage").addEventListener("click", function () { currentPage++; render(); });
 
-  refreshBtn.addEventListener("click", () => {
+  refreshBtn.addEventListener("click", function () {
     refreshBtn.classList.add("spin");
-    setTimeout(() => refreshBtn.classList.remove("spin"), 600);
+    setTimeout(function () { refreshBtn.classList.remove("spin"); }, 600);
     load();
     toast("List refreshed");
   });
 
-  qInput.addEventListener("input", () => { currentPage = 1; render(); });
-  performerFilter.addEventListener("change", () => { currentPage = 1; render(); });
-  channelFilter.addEventListener("change", () => { currentPage = 1; render(); });
-  duplicatesOnly.addEventListener("change", () => { currentPage = 1; render(); });
-  sortSelect.addEventListener("change", () => { currentPage = 1; render(); });
-  pageSizeSelect.addEventListener("change", () => {
+  qInput.addEventListener("input", function () { currentPage = 1; render(); });
+  performerFilter.addEventListener("change", function () { currentPage = 1; render(); });
+  channelFilter.addEventListener("change", function () { currentPage = 1; render(); });
+  duplicatesOnly.addEventListener("change", function () { currentPage = 1; render(); });
+  sortSelect.addEventListener("change", function () { currentPage = 1; render(); });
+  pageSizeSelect.addEventListener("change", function () {
     PAGE_SIZE = parseInt(pageSizeSelect.value, 10) || 15;
     currentPage = 1;
     render();
   });
 
-  document.addEventListener("keydown", (e) => {
+  document.addEventListener("keydown", function (e) {
     if (e.key === "Escape") closeModal();
   });
 
