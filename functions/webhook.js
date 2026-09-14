@@ -344,7 +344,12 @@ function normalizeText(s) {
 }
 
 function tokenize(s) {
-  return normalizeText(s).split(" ").filter(Boolean);
+  // توکن‌های تک‌حرفی رو حذف می‌کنیم (مثلا از «R.I.P.» که بعد از حذف
+  // نقطه‌ها می‌شه «r i p») چون تقریبا هر کلمه‌ای یه‌جا یه حرف مشترک با
+  // یه حرف تنها داره و باعث تطبیق‌های الکی می‌شه
+  return normalizeText(s)
+    .split(" ")
+    .filter((w) => w.length >= 2);
 }
 
 // فاصله‌ی ویرایشیِ دو رشته (چند حرف باید عوض/اضافه/کم/جابه‌جا بشه تا یکی
@@ -417,7 +422,9 @@ async function searchSongs(env, q, limit = 100) {
     // NivaroMusic») و اگه توی جستجو حساب بشن، کلمه‌های عمومیِ اون قالب
     // باعث می‌شن آهنگ‌های کاملا نامربوط هم توی نتیجه بیان.
     const combinedNorm = normalizeText([row.title, row.performer].filter(Boolean).join(" "));
-    const rowTokens = combinedNorm.split(" ").filter(Boolean);
+    const rowTokens = combinedNorm
+      .split(" ")
+      .filter((w) => w.length >= 2);
     if (rowTokens.length === 0) continue;
 
     let totalScore = 0;
