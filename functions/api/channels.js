@@ -22,10 +22,18 @@ function getArchiveChannels(env) {
       return {};
     }
   }
-  if (env.ARCHIVE_CHAT_ID) {
-    return { [String(env.ARCHIVE_CHAT_ID)]: { label: "همه", username: env.CHANNEL_USERNAME || "" } };
+
+  const channels = {};
+  const pairs = [
+    [env.ARCHIVE_CHAT_ID, "Archive 1"],
+    [env.ARCHIVE_CHAT_ID_2, "Archive 2"],
+    [env.ARCHIVE_CHANNEL1, "Archive 1"],
+    [env.ARCHIVE_CHANNEL2, "Archive 2"],
+  ];
+  for (const [id, label] of pairs) {
+    if (id) channels[String(id)] = { label };
   }
-  return {};
+  return channels;
 }
 
 function json(data, status = 200) {
