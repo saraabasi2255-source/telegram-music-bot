@@ -848,7 +848,7 @@ export async function onRequestGet(context) {
       e.preventDefault();
       e.stopPropagation();
       if (action === "copy") copyLink(actionEl.dataset.link);
-      else if (action === "delete") askDelete(Number(actionEl.dataset.id), actionEl.dataset.title);
+      else if (action === "delete") askDelete(actionEl.dataset.id, actionEl.dataset.title);
       return;
     }
 
@@ -857,14 +857,14 @@ export async function onRequestGet(context) {
       var rowC = chev.closest("tr.song-row");
       if (rowC) {
         e.stopPropagation();
-        toggleDetails(Number(rowC.dataset.id));
+        toggleDetails(rowC.dataset.id);
         return;
       }
     }
 
     var row = e.target.closest("tr.song-row");
     if (row) {
-      var id = Number(row.dataset.id);
+      var id = row.dataset.id;
       if (selectionMode) toggleSelect(id);
       else toggleDetails(id);
     }
