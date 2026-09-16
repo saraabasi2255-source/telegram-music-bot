@@ -3,13 +3,11 @@ compatibility_date = "2024-09-01"
 pages_build_output_dir = "public"
 
 [[d1_databases]]
-binding = "DB"                     # در کد با env.DB صداش می‌زنیم
+binding = "DB"
 database_name = "song_search_db"
-database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"
+database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"   # فانک، همون قبلی
 
-# متغیرهای محیطی - این‌ها رو بهتره از داشبورد Cloudflare Pages
-# (Settings > Environment variables) ست کنی، نه اینجا (چون secret هستن)
-# BOT_TOKEN        = توکن بات تلگرام
-# CHANNEL_USERNAME = یوزرنیم چنل بدون @ (مثلا mychannel)
-# MINIAPP_URL      = آدرس نهایی مینی‌اپ بعد از دیپلوی (مثلا https://xxx.pages.dev)
-# WEBHOOK_SECRET   = یه رشته تصادفی دلخواه برای امنیت وبهوک
+[[d1_databases]]
+binding = "DB_EN"
+database_name = "song_search_db_en"
+database_id = "5fcbbe67-b9b1-411b-8a74-d10f96c887fc"
