@@ -1,6 +1,8 @@
 // GET /api/search?q=عبارت جستجو
 // سرچ سریع روی عنوان، خواننده، نام فایل و کپشن با استفاده از ایندکس FTS5
 // (به‌جای اسکن کامل جدول با LIKE '%...%')
+// این نسخه هر دو دیتابیس آرشیو (فانک + انگلیسی) رو می‌خونه و نتایج رو
+// با هم ترکیب می‌کنه.
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -16,20 +18,29 @@ export async function onRequestGet(context) {
   // ۲) کاراکترهای خاص FTS5 (مثل AND/OR/*) به‌عنوان متن خام در نظر گرفته بشن، نه سینتکس
   const phrase = '"' + q.replace(/"/g, '""') + '"';
 
-  try {
-    const stmt = env.DB.prepare(
-      `SELECT s.message_id, s.title, s.performer, s.file_name
-       FROM songs_fts
-       JOIN songs s ON s.id = songs_fts.rowid
-       WHERE songs_fts MATCH ?1
-       ORDER BY bm25(songs_fts, 10.0, 5.0, 3.0, 1.0)
-       LIMIT 30`
-    ).bind(phrase);
+  const dbs = [env.DB, env.DB_EN].filter(Boolean);
 
-    const { results } = await stmt.all();
+  try {
+    const perDb = await Promise.all(
+      dbs.map(async (db) => {
+        const stmt = db.prepare(
+          `SELECT s.message_id, s.title, s.performer, s.file_name
+           FROM songs_fts
+           JOIN songs s ON s.id = songs_fts.rowid
+           WHERE songs_fts MATCH ?1
+           ORDER BY bm25(songs_fts, 10.0, 5.0, 3.0, 1.0)
+           LIMIT 30`
+        ).bind(phrase);
+
+        const { results } = await stmt.all();
+        return results;
+      })
+    );
+
+    const merged = perDb.flat().slice(0, 30);
 
     const channelUsername = env.CHANNEL_USERNAME;
-    const withLinks = results.map((r) => ({
+    const withLinks = merged.map((r) => ({
       title: r.title || r.file_name || "بدون عنوان",
       performer: r.performer || "",
       link: `https://t.me/${channelUsername}/${r.message_id}`,

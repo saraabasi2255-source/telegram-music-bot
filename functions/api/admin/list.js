@@ -1,5 +1,8 @@
 // GET /api/admin/list?key=WEBHOOK_SECRET
-// لیست همه‌ی آهنگ‌های دیتابیس رو برمی‌گردونه
+// لیست همه‌ی آهنگ‌های هر دو دیتابیس (فانک + انگلیسی) رو برمی‌گردونه.
+// چون هر دو دیتابیس id از عدد ۱ شروع می‌شه، اینجا id رو با یه پیشوند
+// ("f:" یا "e:") تگ می‌کنیم تا موقع حذف قاطی نشه. پنل ادمین (index.js)
+// نیازی به تغییر نداره چون همه‌جا id رو به‌صورت رشته‌ی خام دست‌به‌دست می‌کنه.
 
 export async function onRequestGet(context) {
   const { request, env } = context;
@@ -10,13 +13,23 @@ export async function onRequestGet(context) {
     return json({ error: "forbidden" }, 403);
   }
 
-  const { results } = await env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, file_name, caption, duration, created_at
-     FROM songs
-     ORDER BY id DESC`
-  ).all();
+  const dbs = [
+    { db: env.DB, src: "f" },
+    { db: env.DB_EN, src: "e" },
+  ].filter((e) => e.db);
 
-  return json({ ok: true, songs: results });
+  const perDb = await Promise.all(
+    dbs.map(async ({ db, src }) => {
+      const { results } = await db.prepare(
+        `SELECT id, chat_id, message_id, title, performer, file_name, caption, duration, created_at
+         FROM songs
+         ORDER BY id DESC`
+      ).all();
+      return results.map((r) => ({ ...r, id: `${src}:${r.id}` }));
+    })
+  );
+
+  return json({ ok: true, songs: perDb.flat() });
 }
 
 function json(obj, status = 200) {

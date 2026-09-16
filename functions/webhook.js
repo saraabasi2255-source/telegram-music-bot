@@ -33,31 +33,41 @@ export async function onRequestPost(context) {
   return new Response("ok");
 }
 
+// ── مسیریابی به دیتابیس درست بر اساس چنل آرشیو ─────────────────
+// دو دیتابیس D1 مجزا داریم: env.DB (آرشیو اول / فانک) و env.DB_EN
+// (آرشیو دوم / انگلیسی). این تابع می‌گه هر چنل آرشیو به کدوم دیتابیس
+// وصله. "src" یه تگ کوتاهه ("f" یا "e") که همه‌جا برای اینکه بفهمیم
+// یه ردیف/شناسه از کدوم دیتابیس اومده استفاده می‌شه (چون id هر دو
+// دیتابیس جدا از عدد ۱ شروع می‌شه و ممکنه تکراری باشه).
+function getArchiveDbMap(env) {
+  const id1 = env.ARCHIVE_CHAT_ID || env.ARCHIVE_CHANNEL1;
+  const id2 = env.ARCHIVE_CHAT_ID_2 || env.ARCHIVE_CHANNEL2;
+  const map = [];
+  if (id1) map.push({ chatId: String(id1), db: env.DB, src: "f" });
+  if (id2) map.push({ chatId: String(id2), db: env.DB_EN, src: "e" });
+  return map;
+}
+
+function dbBySrc(env, src) {
+  return src === "e" ? env.DB_EN : env.DB;
+}
+
 // ── ذخیره‌ی آهنگ‌های جدید چنل آرشیو ──────────────────────────
 
 async function handleChannelPost(msg, env) {
   const audio = msg.audio;
   if (!audio) return; // فقط فایل‌های صوتی (audio) رو ثبت می‌کنیم
 
-  // 👇 فقط از چنل(های) آرشیو ذخیره کن، نه از چنل اصلی/پابلیک
-  // هم اسم ARCHIVE_CHAT_ID / ARCHIVE_CHAT_ID_2 رو قبول می‌کنه، هم
-  // ARCHIVE_CHANNEL1 / ARCHIVE_CHANNEL2 (هر کدوم توی تنظیمات Cloudflare
-  // ست کرده باشی کار می‌کنه)
-  const archiveIds = [
-    env.ARCHIVE_CHAT_ID,
-    env.ARCHIVE_CHAT_ID_2,
-    env.ARCHIVE_CHANNEL1,
-    env.ARCHIVE_CHANNEL2,
-  ]
-    .filter(Boolean)
-    .map(String);
-
-  if (archiveIds.length === 0) {
+  const archiveMap = getArchiveDbMap(env);
+  if (archiveMap.length === 0) {
     console.warn("هیچ چنل آرشیوی تنظیم نشده - هیچ آهنگی ذخیره نمی‌شه");
     return;
   }
-  if (!archiveIds.includes(String(msg.chat.id))) {
-    // پیام از چنل اصلی یا هر جای دیگه ⇒ نادیده بگیر
+
+  const entry = archiveMap.find((e) => e.chatId === String(msg.chat.id));
+  if (!entry) return; // پیام از چنل اصلی یا هر جای دیگه ⇒ نادیده بگیر
+  if (!entry.db) {
+    console.warn(`دیتابیسِ چنل ${msg.chat.id} (src=${entry.src}) توی wrangler.toml بایند نشده`);
     return;
   }
 
@@ -71,7 +81,7 @@ async function handleChannelPost(msg, env) {
   // نکته: group_id رو اینجا دست نمی‌زنیم (null می‌فرستیم) چون این تابع
   // فقط ایندکس‌کردنِ خودکارِ پیام‌های چنله؛ اگه بات دستیار (webhook-poster.js)
   // قبلا group_id این پیام رو ست کرده باشه، با COALESCE دست‌نخورده می‌مونه
-  await env.DB.prepare(
+  await entry.db.prepare(
     `INSERT INTO songs (chat_id, message_id, title, performer, file_name, caption, duration, group_id)
      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)
      ON CONFLICT(message_id) DO UPDATE SET
@@ -133,9 +143,16 @@ async function handleMessage(msg, env) {
     // https://t.me/<bot_username>?start=ver_<groupId>
     // که تلگرام خودش به‌صورت پیام «/start ver_<groupId>» برامون می‌فرسته
     if (payload.startsWith("ver_")) {
-      const groupId = Number(payload.slice("ver_".length));
+      const rest = payload.slice("ver_".length);
+      let src = "f";
+      let groupIdStr = rest;
+      if (rest.startsWith("f_") || rest.startsWith("e_")) {
+        src = rest[0];
+        groupIdStr = rest.slice(2);
+      }
+      const groupId = Number(groupIdStr);
       if (Number.isInteger(groupId) && groupId > 0) {
-        await deliverGroupVersions(env, chatId, groupId, msg.message_id);
+        await deliverGroupVersions(env, chatId, src, groupId, msg.message_id);
         return;
       }
     }
@@ -205,14 +222,23 @@ async function handleCallbackQuery(cq, env) {
 
   // ① انتخاب یک آهنگ از لیست
   if (data.startsWith("song:")) {
-    const id = Number(data.slice("song:".length));
-    const song = await env.DB.prepare(
-      `SELECT id, chat_id, message_id, title, performer, caption, group_id FROM songs WHERE id = ?1`
-    )
-      .bind(id)
-      .first();
+    const rest = data.slice("song:".length);
+    const sep = rest.indexOf(":");
+    const src = sep === -1 ? "f" : rest.slice(0, sep); // سازگاری با callback_dataهای قدیمی
+    const id = Number(sep === -1 ? rest : rest.slice(sep + 1));
+    const db = dbBySrc(env, src);
+
+    const song = db
+      ? await db
+          .prepare(
+            `SELECT id, chat_id, message_id, title, performer, caption, group_id FROM songs WHERE id = ?1`
+          )
+          .bind(id)
+          .first()
+      : null;
 
     if (song) {
+      song.src = src;
       await deliverSong(env, chatId, song, 0);
     } else {
       await answerCallbackQuery(env, cq.id, "این آهنگ دیگه پیدا نشد.");
@@ -302,10 +328,13 @@ async function handleCallbackQuery(cq, env) {
 
   // ⑤ «نسخه‌های دیگه‌ی این آهنگ» — زیر آهنگی که همین‌جا (با سرچ) تحویل داده شده
   else if (data.startsWith("showver:")) {
-    const groupId = Number(data.slice("showver:".length));
+    const rest = data.slice("showver:".length);
+    const sep = rest.indexOf(":");
+    const src = sep === -1 ? "f" : rest.slice(0, sep);
+    const groupId = Number(sep === -1 ? rest : rest.slice(sep + 1));
     await answerCallbackQuery(env, cq.id);
     if (Number.isInteger(groupId) && groupId > 0) {
-      await deliverGroupVersions(env, chatId, groupId, 0);
+      await deliverGroupVersions(env, chatId, src, groupId, 0);
     }
     return;
   }
@@ -404,14 +433,12 @@ function tokenMatchScore(rt, qt) {
   return 0.6 * (1 - dist / maxLen);
 }
 
-// جستجو در دیتابیس (تا سقف limit) — کلمه‌کلمه، بدون توجه به ترتیب، با
-// تحمل نسبت به تفاوت حروف عربی/فارسی و اشتباه تایپیِ جزئی
-async function searchSongs(env, q, limit = 100) {
-  const queryTokens = tokenize(q);
-  if (queryTokens.length === 0) return [];
-  const normQuery = normalizeText(q);
+// جستجو در یه دیتابیسِ مشخص — همون منطق قبلی، فقط جدا شده تا بشه
+// روی هر دو دیتابیس (فانک/انگلیسی) صداش زد
+async function searchInOneDb(db, src, queryTokens, normQuery) {
+  if (!db) return [];
 
-  const { results } = await env.DB.prepare(
+  const { results } = await db.prepare(
     `SELECT id, chat_id, message_id, title, performer, caption, file_name, group_id FROM songs`
   ).all();
 
@@ -446,9 +473,26 @@ async function searchSongs(env, q, limit = 100) {
     if (combinedNorm.includes(normQuery)) totalScore += 5;
 
     const avgScore = totalScore / queryTokens.length;
-    scored.push({ row, avgScore, len: (row.title || row.file_name || "").length });
+    scored.push({ row: { ...row, src }, avgScore, len: (row.title || row.file_name || "").length });
   }
 
+  return scored;
+}
+
+// جستجو روی هر دو دیتابیس (تا سقف limit) و ترکیبِ نتایج — کلمه‌کلمه،
+// بدون توجه به ترتیب، با تحمل نسبت به تفاوت حروف عربی/فارسی و اشتباه
+// تایپیِ جزئی
+async function searchSongs(env, q, limit = 100) {
+  const queryTokens = tokenize(q);
+  if (queryTokens.length === 0) return [];
+  const normQuery = normalizeText(q);
+
+  const archiveMap = getArchiveDbMap(env).filter((e) => e.db);
+  const perDb = await Promise.all(
+    archiveMap.map((e) => searchInOneDb(e.db, e.src, queryTokens, normQuery))
+  );
+
+  const scored = perDb.flat();
   scored.sort((a, b) => b.avgScore - a.avgScore || a.len - b.len);
 
   return scored.slice(0, limit).map((s) => s.row);
@@ -477,7 +521,7 @@ function buildResultsKeyboard(results, page, q, userMessageId) {
   const slice = results.slice(start, start + PAGE_SIZE);
 
   const rows = slice.map((r) => [
-    { text: buildLabel(r), callback_data: `song:${r.id}` },
+    { text: buildLabel(r), callback_data: `song:${r.src || "f"}:${r.id}` },
   ]);
 
   // ردیف ناوبری: قبلی / شماره صفحه / بعدی
@@ -557,10 +601,11 @@ async function deliverSong(env, toChatId, song, userMessageId) {
     return;
   }
 
+  const src = song.src || "f";
   const rows = [];
   if (song.group_id) {
     rows.push([
-      { text: "🎧 نسخه‌های دیگه‌ی این آهنگ", callback_data: `showver:${song.group_id}` },
+      { text: "🎧 نسخه‌های دیگه‌ی این آهنگ", callback_data: `showver:${src}:${song.group_id}` },
     ]);
   }
   rows.push([{ text: "Close", callback_data: `close_song:${userMessageId || 0}` }]);
@@ -592,7 +637,8 @@ async function deliverSong(env, toChatId, song, userMessageId) {
       desc.includes("message_id_invalid")
     ) {
       if (song.id) {
-        await env.DB.prepare(`DELETE FROM songs WHERE id = ?1`).bind(song.id).run();
+        const db = dbBySrc(env, src);
+        if (db) await db.prepare(`DELETE FROM songs WHERE id = ?1`).bind(song.id).run();
       }
       await sendMessage(
         env,
@@ -608,15 +654,19 @@ async function deliverSong(env, toChatId, song, userMessageId) {
 // ── ارسال «نسخه‌های دیگه‌ی یک آهنگ» پشت سر هم ─────────────────
 // groupId توسط بات دستیارِ پست‌گذاری (webhook-poster.js) موقع پست کردن
 // هر آهنگ توی کانال ساخته/استفاده می‌شه (جدول song_groups)
-async function deliverGroupVersions(env, chatId, groupId, userMessageId) {
-  const { results } = await env.DB.prepare(
-    `SELECT id, chat_id, message_id, title, performer, caption, group_id
-     FROM songs
-     WHERE group_id = ?1
-     ORDER BY id ASC`
-  )
-    .bind(groupId)
-    .all();
+async function deliverGroupVersions(env, chatId, src, groupId, userMessageId) {
+  const db = dbBySrc(env, src);
+  const { results } = db
+    ? await db
+        .prepare(
+          `SELECT id, chat_id, message_id, title, performer, caption, group_id
+           FROM songs
+           WHERE group_id = ?1
+           ORDER BY id ASC`
+        )
+        .bind(groupId)
+        .all()
+    : { results: [] };
 
   if (!results || results.length === 0) {
     await sendMessage(env, chatId, "نسخه‌ی دیگه‌ای از این آهنگ پیدا نشد 🙁");
@@ -631,6 +681,7 @@ async function deliverGroupVersions(env, chatId, groupId, userMessageId) {
 
   // پشت سر هم و به ترتیب (نه موازی) می‌فرستیم تا توی چت به هم نریزن
   for (const song of results) {
+    song.src = src;
     await deliverSong(env, chatId, song, userMessageId);
   }
 }
