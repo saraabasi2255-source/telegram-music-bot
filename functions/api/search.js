@@ -18,13 +18,18 @@ export async function onRequestGet(context) {
   // ۲) کاراکترهای خاص FTS5 (مثل AND/OR/*) به‌عنوان متن خام در نظر گرفته بشن، نه سینتکس
   const phrase = '"' + q.replace(/"/g, '""') + '"';
 
-  const dbs = [env.DB, env.DB_EN].filter(Boolean);
+  // برای اینکه بشه لینک «ارسال از ربات» (song_<src>_<id>) رو ساخت، لازمه
+  // بدونیم هر نتیجه از کدوم دیتابیس اومده ("f" = فانک/env.DB، "e" = انگلیسی/env.DB_EN)
+  const dbs = [
+    { db: env.DB, src: "f" },
+    { db: env.DB_EN, src: "e" },
+  ].filter((e) => e.db);
 
   try {
     const perDb = await Promise.all(
-      dbs.map(async (db) => {
+      dbs.map(async ({ db, src }) => {
         const stmt = db.prepare(
-          `SELECT s.message_id, s.title, s.performer, s.file_name
+          `SELECT s.id, s.message_id, s.title, s.performer, s.file_name
            FROM songs_fts
            JOIN songs s ON s.id = songs_fts.rowid
            WHERE songs_fts MATCH ?1
@@ -33,17 +38,21 @@ export async function onRequestGet(context) {
         ).bind(phrase);
 
         const { results } = await stmt.all();
-        return results;
+        return results.map((r) => ({ ...r, src }));
       })
     );
 
     const merged = perDb.flat().slice(0, 30);
 
     const channelUsername = env.CHANNEL_USERNAME;
+    const botUsername = env.BOT_USERNAME; // یوزرنیمِ بات، بدون @ (مثلا NivaroMusic_bot)
     const withLinks = merged.map((r) => ({
       title: r.title || r.file_name || "بدون عنوان",
       performer: r.performer || "",
-      link: `https://t.me/${channelUsername}/${r.message_id}`,
+      link: channelUsername ? `https://t.me/${channelUsername}/${r.message_id}` : null,
+      // کلیک روی این لینک بات رو با /start song_<src>_<id> باز می‌کنه و بات
+      // خودش مستقیم فایل آهنگ رو (با copyMessage) برای کاربر می‌فرسته
+      botLink: botUsername ? `https://t.me/${botUsername}?start=song_${r.src}_${r.id}` : null,
     }));
 
     return json({ results: withLinks });
