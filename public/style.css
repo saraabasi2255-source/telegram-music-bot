@@ -79,18 +79,48 @@ body {
 .song-item {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
   background: var(--card);
   border-radius: 14px;
-  padding: 12px 14px;
+  padding: 8px 8px 8px 14px;
+}
+
+.song-main {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
   text-decoration: none;
   color: var(--text);
+  padding: 4px 0;
+  transition: transform 0.08s ease, opacity 0.15s ease;
+}
+
+.song-main:active {
+  transform: scale(0.98);
+  opacity: 0.85;
+}
+
+/* دکمه‌ی «ارسال از ربات» */
+.song-bot-btn {
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: none;
+  background: rgba(106, 179, 243, 0.14);
+  color: var(--link);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
   transition: transform 0.08s ease, background 0.15s ease;
 }
 
-.song-item:active {
-  transform: scale(0.98);
-  background: rgba(224, 164, 88, 0.12);
+.song-bot-btn:active {
+  transform: scale(0.92);
+  background: rgba(106, 179, 243, 0.28);
 }
 
 .song-note {

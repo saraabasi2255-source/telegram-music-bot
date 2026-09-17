@@ -46,29 +46,64 @@ function renderResults(items) {
   statusEl.textContent = `${items.length} نتیجه`;
 
   for (const item of items) {
-    const a = document.createElement("a");
-    a.className = "song-item";
-    a.href = item.link;
-    a.target = "_blank";
-    a.rel = "noopener";
+    const li = document.createElement("li");
+    li.className = "song-item";
 
-    a.innerHTML = `
+    // بخش اصلی (آیکون + عنوان/خواننده) — کلیکش مثل قبل، از کانال آرشیو باز می‌کنه
+    const main = document.createElement(item.link ? "a" : "div");
+    main.className = "song-main";
+    if (item.link) {
+      main.href = item.link;
+      main.target = "_blank";
+      main.rel = "noopener";
+    }
+    main.innerHTML = `
       <div class="song-note">♪</div>
       <div class="song-text">
         <div class="song-title">${escapeHtml(item.title)}</div>
         ${item.performer ? `<div class="song-performer">${escapeHtml(item.performer)}</div>` : ""}
       </div>
     `;
+    if (item.link) {
+      main.addEventListener("click", (e) => {
+        openLink(e, item.link);
+      });
+    }
+    li.appendChild(main);
 
-    a.addEventListener("click", (e) => {
-      if (tg) {
+    // دکمه‌ی «ارسال از ربات» — به‌جای باز کردن از کانال آرشیو، همین آهنگ
+    // رو مستقیم توی چتِ بات برای کاربر می‌فرسته (لینک song_<src>_<id>)
+    if (item.botLink) {
+      const botBtn = document.createElement("button");
+      botBtn.type = "button";
+      botBtn.className = "song-bot-btn";
+      botBtn.title = "دریافت از ربات";
+      botBtn.setAttribute("aria-label", "دریافت از ربات");
+      botBtn.innerHTML = `
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+          <path d="M21 3 3 10.5l6.5 2.5M21 3l-6 18-4.5-8M21 3 9.5 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      `;
+      botBtn.addEventListener("click", (e) => {
         e.preventDefault();
-        tg.openTelegramLink(item.link);
-      }
-      // اگه بیرون از تلگرام باز شده، لینک معمولی خودش کار می‌کنه
-    });
+        e.stopPropagation();
+        openLink(e, item.botLink);
+      });
+      li.appendChild(botBtn);
+    }
 
-    resultsEl.appendChild(a);
+    resultsEl.appendChild(li);
+  }
+}
+
+// وقتی داخل مینی‌اپ تلگرام باز شده باشیم، لینک‌های t.me رو با
+// openTelegramLink باز می‌کنیم (تجربه‌ی روان‌تر)؛ بیرون از تلگرام، لینک
+// معمولی خودش کار می‌کنه.
+function openLink(e, url) {
+  if (!url) return;
+  if (tg) {
+    e.preventDefault();
+    tg.openTelegramLink(url);
   }
 }
 
