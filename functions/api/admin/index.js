@@ -129,6 +129,8 @@ export async function onRequestGet(context) {
   .btn-danger:hover { background: var(--danger); color: #fff; }
   .btn-open { background: var(--teal-soft); color: var(--teal); border: 1px solid #2dd4bf3d; text-decoration: none; }
   .btn-open:hover { background: var(--teal); color: #06201c; }
+  .btn-bot { background: var(--accent-soft); color: var(--accent); border: 1px solid #5b8cff3d; text-decoration: none; }
+  .btn-bot:hover { background: var(--accent); color: #fff; }
   .btn-ghost { background: transparent; color: var(--text-dim); border: 1px solid var(--border); }
   .btn-ghost:hover { color: var(--text); border-color: var(--accent); }
   .btn-copy { background: transparent; color: var(--text-faint); border: 1px solid var(--border); padding: 8px 9px; }
@@ -463,6 +465,7 @@ export async function onRequestGet(context) {
 
   var allSongs = [];
   var channelLabels = {};
+  var botUsername = null;
   var duplicateTitles = new Set();
   var currentPage = 1;
   var PAGE_SIZE = 15;
@@ -519,6 +522,16 @@ export async function onRequestGet(context) {
     return "https://t.me/c/" + shortId + "/" + messageId;
   }
 
+  // لینکی که با کلیک روش، بات رو با /start song_<src>_<id> باز می‌کنه و
+  // بات خودش مستقیم فایل آهنگ رو برای کاربر می‌فرسته (بدون نیاز به سرچ)
+  function buildBotLink(id) {
+    if (!botUsername || !id) return null;
+    var sep = String(id).indexOf(":");
+    var src = sep === -1 ? "f" : id.slice(0, sep);
+    var numId = sep === -1 ? id : id.slice(sep + 1);
+    return "https://t.me/" + botUsername + "?start=song_" + src + "_" + numId;
+  }
+
   function splitPerformers(performer) {
     if (!performer) return [];
     return performer
@@ -563,6 +576,7 @@ export async function onRequestGet(context) {
       if (!res.ok) throw new Error("Failed to load list (" + res.status + ")");
       var data = await res.json();
       allSongs = data.songs || [];
+      botUsername = data.botUsername || null;
       computeDuplicateTitles();
       populatePerformerFilter();
       populateChannelFilter();
@@ -697,6 +711,10 @@ export async function onRequestGet(context) {
       var copyBtn = tgLink
         ? '<button class="btn-copy" data-action="copy" data-link="' + esc(tgLink) + '" title="Copy link"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg> Copy link</button>'
         : "";
+      var botLink = buildBotLink(s.id);
+      var botBtn = botLink
+        ? '<a class="btn btn-bot" href="' + esc(botLink) + '" target="_blank" rel="noopener" data-action="stop"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 3 3 10.5l6.5 2.5M21 3l-6 18-4.5-8M21 3 9.5 13" stroke-linecap="round" stroke-linejoin="round"/></svg> Send via bot</a>'
+        : "";
 
       var checkboxHtml = selectionMode
         ? '<span class="row-checkbox' + (isSelected ? ' checked' : '') + '"><svg viewBox="0 0 24 24" fill="none"><path d="M20 6 9 17l-5-5" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg></span>'
@@ -720,7 +738,7 @@ export async function onRequestGet(context) {
             '<div><span class="detail-label">Chat ID</span><span class="detail-value">' + esc(s.chat_id) + '</span></div>' +
             '<div><span class="detail-label">Message ID</span><span class="detail-value">' + esc(s.message_id) + '</span></div>' +
           '</div>' +
-          '<div class="detail-actions">' + openBtn + copyBtn +
+          '<div class="detail-actions">' + openBtn + copyBtn + botBtn +
             '<button class="btn btn-danger" data-action="delete" data-id="' + s.id + '" data-title="' + esc(s.title) + '">Delete</button>' +
           '</div>' +
         '</td>' +

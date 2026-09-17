@@ -29,7 +29,7 @@ export async function onRequestGet(context) {
     })
   );
 
-  return json({ ok: true, songs: perDb.flat() });
+  return json({ ok: true, songs: perDb.flat(), botUsername: env.BOT_USERNAME || null });
 }
 
 function json(obj, status = 200) {
