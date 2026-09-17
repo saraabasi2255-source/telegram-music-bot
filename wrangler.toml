@@ -11,3 +11,8 @@ database_id = "2e7d2389-a464-4b5c-9374-6b516cff497e"   # فانک، همون ق�
 binding = "DB_EN"
 database_name = "song_search_db_en"
 database_id = "5fcbbe67-b9b1-411b-8a74-d10f96c887fc"
+
+# لازمه برای ساختن لینکِ «ارسال از ربات» توی /api/search (song_<src>_<id>)
+# یوزرنیمِ بات رو بدون @ بذار، مثلا:
+# [vars]
+# BOT_USERNAME = "NivaroMusic_bot"
