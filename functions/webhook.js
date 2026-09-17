@@ -139,6 +139,39 @@ async function handleMessage(msg, env) {
       }
     }
 
+    // دکمه‌ی «ارسال از ربات» توی سایت، این لینک رو می‌سازه:
+    // https://t.me/<bot_username>?start=song_<src>_<id>
+    // که با /start song_f_123 (یا song_e_123) بهمون می‌رسه — همون آهنگ رو
+    // مستقیم (بدون سرچ) با copyMessage برای کاربر می‌فرستیم.
+    if (payload.startsWith("song_")) {
+      const rest = payload.slice("song_".length);
+      let src = "f";
+      let idStr = rest;
+      if (rest.startsWith("f_") || rest.startsWith("e_")) {
+        src = rest[0];
+        idStr = rest.slice(2);
+      }
+      const songId = Number(idStr);
+      if (Number.isInteger(songId) && songId > 0) {
+        const db = dbBySrc(env, src);
+        const song = db
+          ? await db
+              .prepare(
+                `SELECT id, chat_id, message_id, title, performer, group_id FROM songs WHERE id = ?1`
+              )
+              .bind(songId)
+              .first()
+          : null;
+
+        if (song) {
+          await deliverSong(env, chatId, { ...song, src }, null);
+        } else {
+          await sendMessage(env, chatId, "این آهنگ پیدا نشد یا از آرشیو حذف شده 🙁");
+        }
+        return;
+      }
+    }
+
     // لینک شیشه‌ای «نسخه‌های دیگه‌ی این آهنگ» به شکل زیر بات رو باز می‌کنه:
     // https://t.me/<bot_username>?start=ver_<groupId>
     // که تلگرام خودش به‌صورت پیام «/start ver_<groupId>» برامون می‌فرسته
